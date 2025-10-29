@@ -1,0 +1,59 @@
+target Python{
+    fast: true,
+}
+
+import MonostableCylinder from "../../src/common/MonostableCylinder.lf"
+
+preamble{=
+    import uuid
+    from frost import *
+    from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+=}
+
+main reactor {
+    state prev_state
+    state n_iterations = 5
+    state counter = 0
+    state cmd_time = 0
+
+
+    mc = new MonostableCylinder(name="monostable_cylinder", _is_retracted=True)
+
+    reaction (mc.s) -> mc.cmd{=
+
+        if self.counter >= self.n_iterations:
+            return 0
+
+        prev_state = self.prev_state
+        state = mc.s.value
+        next_cmd = None
+
+        if prev_state is None:
+            assert state == MonostableCylinderState.RETRACTED
+            next_cmd = MonostableCylinderCmd.EXTEND
+        elif state == MonostableCylinderState.RETRACTED:
+            assert prev_state == MonostableCylinderState.RETRACTING
+            assert lf.time.logical_elapsed() - self.cmd_time == SECS(1), f"Expected 1s retraction, got {lf.time.logical_elapsed() - self.cmd_time}s"
+            self.counter += 1
+            next_cmd = MonostableCylinderCmd.EXTEND
+        elif state == MonostableCylinderState.EXTENDED:
+            assert prev_state == MonostableCylinderState.EXTENDING
+            assert lf.time.logical_elapsed() - self.cmd_time == SECS(1), f"Expected 1s extension, got {lf.time.logical_elapsed() - self.cmd_time} ns"
+            next_cmd = MonostableCylinderCmd.RETRACT
+        elif state == MonostableCylinderState.EXTENDING:
+            assert prev_state == MonostableCylinderState.RETRACTED
+        elif state == MonostableCylinderState.RETRACTING:
+            assert prev_state == MonostableCylinderState.EXTENDED
+        else:
+            raise Exception("Invalid state transition")
+
+        self.prev_state = state
+        if next_cmd is not None:
+            mc.cmd.set(next_cmd)
+            self.cmd_time = lf.time.logical_elapsed()
+    =}
+
+    reaction (shutdown) {=
+        assert self.counter == self.n_iterations, f"Expected {self.n_iterations} iterations, but got {self.counter}"
+    =}
+}

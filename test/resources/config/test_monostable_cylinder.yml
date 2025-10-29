@@ -1,0 +1,9 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  monostable_cylinder:
+    logging_level: DEBUG
+    parameters:
+      retraction_speed: 0.1 # m/s
+      extension_speed: 0.1 # m/s
+      extension_length: 0.1 # m
