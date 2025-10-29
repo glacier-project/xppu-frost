@@ -1,0 +1,144 @@
+target Python{
+    files: [
+        "../python-lib/monostable_cylinder.py",
+    ],
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+reactor MonostableCylinder(
+    _retraction_speed=0.2, # m/s
+    _extension_speed=0.2, # m/s
+    _extension_length=0.010, # m
+    _is_retracted=True
+)  extends FrostBase{
+
+    input cmd 
+    output s 
+
+    state retraction_speed = _retraction_speed
+    state extension_speed = _extension_speed
+    state extension_length = _extension_length
+    state is_retracted = _is_retracted
+    
+    state mc_state 
+    state retraction_time 
+    state extension_time
+    state transition_start_time
+    state current_cmd
+
+    logical action update_state
+
+    // @label _initialize_timings
+    reaction (startup) -> s{=
+        self.logger.info("Initializing MonostableCylinder... Using parameters: "
+                         f"retraction_speed={self.retraction_speed} m/s, "
+                         f"extension_speed={self.extension_speed} m/s, "
+                         f"extension_length={self.extension_length} m, "
+                         f"initially_retracted={self.is_retracted}")
+        self.retraction_time = convert_time(self.extension_length / self.retraction_speed, TimePrecision.SECS, TimePrecision.NSECS)
+        self.extension_time = convert_time(self.extension_length / self.extension_speed, TimePrecision.SECS, TimePrecision.NSECS)
+        self.mc_state = MonostableCylinderState.RETRACTED if self.is_retracted else MonostableCylinderState.EXTENDED
+        self.current_cmd = MonostableCylinderCmd.RETRACT if self.is_retracted else MonostableCylinderCmd.EXTEND
+
+        self.logger.info(f"MonostableCylinder initialized with retraction_time={self.retraction_time} ns, extension_time={self.extension_time} ns, initial_state={self.mc_state.name}")
+
+        s.set(self.mc_state)
+    =}
+
+    // @label _update_state
+    reaction (update_state) -> s, update_state{=
+        new_state = update_state.value
+        current_cmd = self.current_cmd
+        current_state = self.mc_state
+
+        if new_state == MonostableCylinderState.EXTENDED and current_cmd == MonostableCylinderCmd.RETRACT:
+            return 0  # Ignore invalid transition
+        if new_state == MonostableCylinderState.RETRACTED and current_cmd == MonostableCylinderCmd.EXTEND:
+            return 0  # Ignore invalid transition
+
+        if new_state == MonostableCylinderState.EXTENDING:
+            assert current_cmd == MonostableCylinderCmd.EXTEND, "EXTENDING state requires EXTEND command"
+            transition_start_time = lf.time.logical_elapsed()
+
+            extension_time = 0
+            if current_state == MonostableCylinderState.RETRACTED:
+                # full time
+                extension_time = self.extension_time
+            elif current_state == MonostableCylinderState.RETRACTING:
+                # calculate remaining time based on elapsed time
+                elapsed_time = lf.time.logical_elapsed() - self.transition_start_time
+                remaining_time = max(0, self.extension_time - elapsed_time)
+                extension_time = remaining_time
+            else:
+                raise Exception("Invalid state transition to EXTENDING")
+            
+            update_state.schedule(extension_time, MonostableCylinderState.EXTENDED)
+            
+        elif new_state == MonostableCylinderState.RETRACTING:
+            assert current_cmd == MonostableCylinderCmd.RETRACT, "RETRACTING state requires RETRACT command"
+            transition_start_time = lf.time.logical_elapsed()
+            
+            retraction_time = 0
+            if current_state == MonostableCylinderState.EXTENDED:
+                # full time
+                retraction_time = self.retraction_time
+            elif current_state == MonostableCylinderState.EXTENDING:
+                # calculate remaining time based on elapsed time
+                elapsed_time = lf.time.logical_elapsed() - self.transition_start_time
+                remaining_time = max(0, self.retraction_time - elapsed_time)
+                retraction_time = remaining_time
+            else:
+                raise Exception("Invalid state transition to RETRACTING")
+            update_state.schedule(retraction_time, MonostableCylinderState.RETRACTED)
+        else:
+            assert new_state in [MonostableCylinderState.RETRACTED, MonostableCylinderState.EXTENDED], "Invalid target state"
+
+        self.logger.info(f"Transitioning from {self.mc_state.name} to {new_state.name}")
+        self.mc_state = new_state
+        s.set(new_state)
+    =}
+
+    // @label _handle_cmd
+    reaction (cmd) -> update_state{=
+
+        state = self.mc_state
+        command = cmd.value
+        self.current_cmd = command
+
+        self.logger.info(f"Current state: {state.name}, Received command: {command.name}")
+
+        if state == MonostableCylinderState.RETRACTED:
+            if command == MonostableCylinderCmd.EXTEND:
+                update_state.schedule(0, MonostableCylinderState.EXTENDING)
+            elif command == MonostableCylinderCmd.RETRACT:
+                self.logger.info("Already in RETRACTED state. No action taken.")
+            else:
+                raise Exception("Invalid command")
+        elif state == MonostableCylinderState.EXTENDED:
+            if command == MonostableCylinderCmd.RETRACT:
+                update_state.schedule(0, MonostableCylinderState.RETRACTING)
+            elif command == MonostableCylinderCmd.EXTEND:
+                self.logger.info("Already in EXTENDED state. No action taken.")
+            else:
+                raise Exception("Invalid command")
+        elif state == MonostableCylinderState.RETRACTING:
+            if command == MonostableCylinderCmd.RETRACT:
+                self.logger.info("Currently RETRACTING. Command will be processed upon completion.")
+            elif command == MonostableCylinderCmd.EXTEND:
+                self.logger.info("Transitioning to EXTENDING state from RETRACTING.")
+                update_state.schedule(0, MonostableCylinderState.EXTENDING)
+            else:
+                raise Exception("Invalid command")
+        elif state == MonostableCylinderState.EXTENDING:
+            if command == MonostableCylinderCmd.EXTEND:
+                self.logger.info("Currently EXTENDING. Command will be processed upon completion.")
+            elif command == MonostableCylinderCmd.RETRACT:
+                self.logger.info("Transitioning to RETRACTING state from EXTENDING.")
+                update_state.schedule(0, MonostableCylinderState.RETRACTING)
+            else:
+                raise Exception("Invalid command")
+        else:
+            raise Exception("Invalid state")
+    =}
+}
