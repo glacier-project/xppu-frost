@@ -1,0 +1,13 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  stack:
+    logging_level: DEBUG
+    reactors:
+      monostable_cylinder:
+        logging_level: DEBUG
+        parameters:
+          _retraction_speed: 223.684 # m/s
+          _extension_speed: 472.222 # m/s
+          _extension_length: 0.07 # m
+          _is_retracted: true

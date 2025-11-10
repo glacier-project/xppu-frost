@@ -1,0 +1,49 @@
+name: "stack" # name of the machine
+machine_category: "unknown" # category of the machine
+machine_type: "unknown" # type of the machine
+machine_model: "unknown" # model of the machine
+description: "" # description of the machine
+root:
+  !!FolderNode
+  name: "Stack"
+  description: ""
+  children:
+    - !!FolderNode
+      name: "Methods"
+      description: ""
+      children:
+        - !!MethodNode
+          name: "RequestWp"
+          description: ""
+    - !!FolderNode
+      name: "Variables"
+      description: ""
+      children:
+      - !!NumericalVariableNode
+        name: "WpAvailable"
+        description: ""
+        initial_value: false
+      # - !!NumericalVariableNode
+      #   name: "IsEmpty"
+      #   description: ""
+      #   initial_value: false
+      - !!NumericalVariableNode
+        name: "McRetracted"
+        description: ""
+        initial_value: false
+      - !!NumericalVariableNode
+        name: "McRetracting"
+        description: ""
+        initial_value: false
+      - !!NumericalVariableNode
+        name: "McExtending"
+        description: ""
+        initial_value: false
+      - !!NumericalVariableNode
+        name: "WpColor"
+        description: ""
+        initial_value: false
+      - !!NumericalVariableNode
+        name: "WpInductive"
+        description: ""
+        initial_value: false

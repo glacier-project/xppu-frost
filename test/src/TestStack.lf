@@ -1,0 +1,59 @@
+target Python{
+    fast: true,
+}
+
+import Stack from "../../src/stack/Stack.lf"
+
+preamble{=
+    import uuid
+    from frost import *
+    from f_compare import *
+    from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+    from shape import Shape, CircleShape, RectangularShape, MaterialSquareShape, ComponentShape, ConveyorBeltShape, Point
+    from shape_util import set_wp_coordinates_to
+    from stack import StackCmd
+    from material import Position, Material, SteelMaterial, PlasticMaterial
+    from copy import deepcopy
+=}
+
+preamble{=
+stack_wps = [
+    SteelMaterial(id=str(uuid.uuid4())),
+    PlasticMaterial(id=str(uuid.uuid4())),
+    SteelMaterial(id=str(uuid.uuid4()))
+]
+print(f"Initialized stack WPs: {stack_wps}")
+=}
+
+main reactor {
+    state wp_index = 0
+    logical action request_wp;
+    
+    s = new Stack(name = "stack", buffer = {=deepcopy(stack_wps)=})
+    
+    reaction (startup) -> request_wp{=
+        request_wp.schedule(0) 
+    =}
+
+    reaction (request_wp) -> s.provide_wp{=
+        print("Requesting WP from Stack")
+        s.provide_wp.set(True)
+    =}
+
+    reaction (s.wp_at_pickup) -> request_wp{=
+        current_time = lf.time.logical_elapsed()
+        wp = s.wp_at_pickup.value
+        
+        assert stack_wps[self.wp_index] == wp, f"Expected WP {stack_wps[self.wp_index]}, got {wp}"
+        self.wp_index += 1
+        assert current_time == 148235* self.wp_index, f"Expected time {148235* self.wp_index} ns, got {current_time} ns"
+        request_wp.schedule(0)
+
+    =}
+
+    reaction (s.is_empty) {=
+        print("Stack is empty")
+        assert s.is_empty.value == True, "Expected stack to be empty"
+        assert self.wp_index == len(stack_wps), f"Expected {len(stack_wps)} WPs, got {self.wp_index}"
+    =}
+}

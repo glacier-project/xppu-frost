@@ -1,0 +1,95 @@
+target Python{
+    files: [
+        "../python-lib/stack.py",
+        "../python-lib/material.py",
+        "../python-lib/shape.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape_util.py",
+    ],
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+reactor Stack(
+    buffer={=list()=},
+    ref_x = 0, # m
+    ref_y = 0, # m
+    c_angle = 0 # radians
+) extends FrostBase{
+    preamble{=
+        BUFFER_SIZE="buffer_size"
+        LENGTH=0.18 # m
+        WIDTH=0.055 # m
+        BUFFER_OFFSET=0 # m
+        BUFFER_LENGTH=0.055 # m
+        BUFFER_WIDTH=0.055 # m
+        PU_OFFSET=0.125 # m
+        PU_LENGTH=0.055 # m
+        PU_WIDTH=0.055 # m
+    =}
+
+    input provide_wp;
+    output wp_at_pickup;
+    output mc_state;
+    output is_empty;
+    mc.s -> mc_state;
+
+    state _buffer = buffer
+    state _c_shape = {=ComponentShape(centroid_pos=Point(self.ref_x+self.LENGTH/2, self.ref_y+self.WIDTH/2, 0), base=self.LENGTH, height=self.WIDTH, angle=self.c_angle)=}
+    state _buffer_area = {= self._c_shape.get_sensor_shape(self.BUFFER_OFFSET, self.BUFFER_WIDTH, self.BUFFER_LENGTH) =}
+    state _pu_area = {= self._c_shape.get_sensor_shape(self.PU_OFFSET, self.PU_WIDTH, self.PU_LENGTH) =}
+    state providing_wp = False
+
+    mc = new MonostableCylinder(
+        name={= self.name + ".mc" =},     
+        retraction_speed=223.684, # m/s t= 0.38ms TODO check
+        extension_speed=472.222, # m/s t= 0.18ms TODO check
+        extension_length=0.07, # m
+        is_retracted=True
+    )
+    // mc.retracted -> mc_retracted
+
+    reaction(startup){=
+        self.logger.info(f"Stack initialized with items: {self._buffer}, buffer area: {self._buffer_area}, pu area: {self._pu_area}")
+
+        # Initialize wp coordinates
+        for wp in self._buffer:
+            set_wp_coordinates_to(wp, self._buffer_area)
+    =}
+
+    # @label provide_wp
+    reaction (provide_wp) -> mc.cmd{=
+        if not provide_wp.is_present:
+            return 0
+        
+        # extend MC
+        self.logger.debug("WP requested, extending MC")
+        mc.cmd.set(MonostableCylinderCmd.EXTEND)
+        self.providing_wp = True
+    =}
+
+    # @label wp_ready
+    reaction (mc.s) -> wp_at_pickup, mc.cmd, is_empty{=
+        mc_state = mc.s.value
+
+        # set is_empty if no WPs are available
+        if mc_state == MonostableCylinderState.EXTENDED and not self._buffer:
+            if len(self._buffer) <= 0:
+                self.logger.debug("No available WP")
+                is_empty.set(True)
+                return 0
+                
+        # provide WP
+        if mc_state == MonostableCylinderState.RETRACTED and self.providing_wp:
+            self.providing_wp = False
+            wp = self._buffer.pop(0)
+            wp_at_pickup.set(wp)
+            set_wp_coordinates_to(wp, self._pu_area)
+            mc.cmd.set(MonostableCylinderCmd.RETRACT)
+            self.logger.debug(f"WP {wp} available for pickup, retracting MC")
+
+        
+    =}
+}
