@@ -1,0 +1,138 @@
+target Python{
+    files: [
+        "../python-lib/crane_utils.py"
+    ]
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+preamble{=
+from crane_utils import MotorCMD
+=}
+
+reactor MDriver (dpos_dict={=dict()=}, accuracy=0.001) extends FrostBase{
+    input cmd
+    input angle
+    output m_cmd
+    output d_pos
+    state current_cmd
+    state prev_cmd = {=None=}
+    state current_angle
+
+    method compute_direction(angle, d_angle){=
+        self.logger.debug(f"Compute direction received angle={angle} and d_angle={d_angle}")
+
+        # no cmd, position reached 
+        if abs(angle - d_angle ) <= self.accuracy:
+            return MotorCMD.IDLE 
+
+        # compute cw angle and ccw angle
+        if d_angle > angle:
+            ccw_angle = (d_angle-angle)
+            cw_angle = (np.pi*2) - ccw_angle
+        else:
+            cw_angle = (angle-d_angle)
+            ccw_angle = (np.pi*2) - cw_angle
+
+        # compute direction
+        return MotorCMD.CW if cw_angle < ccw_angle else MotorCMD.CCW 
+    =}
+
+    // @label compute_cmd
+    reaction(cmd, angle) -> m_cmd, d_pos{=
+        if cmd.is_present:
+            self.current_cmd = cmd.value
+        
+        if angle.is_present:
+            self.current_angle = angle.value
+        
+        cmd = self.current_cmd
+        angle = self.current_angle
+
+        self.logger.debug(f"Current cmd={cmd}, angle={angle}")
+        if angle is None or cmd is None:
+            return 0
+
+        # compute direction
+        d_angle = self.dpos_dict[cmd]
+        _m_cmd = self.compute_direction(angle=angle, d_angle=d_angle)
+
+        # write the cmd only when change 
+        if self.prev_cmd is None or _m_cmd != self.prev_cmd:
+            self.prev_cmd = _m_cmd
+            m_cmd.set(_m_cmd)
+            self.logger.debug(f"Setting {_m_cmd=} with {angle=} and {d_angle=}")
+
+        if _m_cmd == MotorCMD.IDLE:
+            self.logger.debug(f"Position {cmd} reached at angle {angle}, setting d_pos")
+            d_pos.set(cmd)
+    =}
+}
+
+reactor Motor (
+    initial_angle=0, 
+    tick_interval=10 ms,
+    ang_speed=1 # rad/s
+) extends FrostBase{
+    input m_cmd
+    output angle
+    state current_angle=initial_angle 
+    state current_cmd={=MotorCMD.IDLE=}
+    timer tick (tick_interval, tick_interval)
+
+    reaction(startup) -> angle{=
+        angle.set(self.current_angle)
+    =}
+
+    reaction(tick) -> angle{=
+        cmd = self.current_cmd
+        
+        if cmd == MotorCMD.IDLE:
+            return 0
+        
+        dt = self.tick_interval/1e9
+        d_angle = self.ang_speed*dt
+
+        self.logger.info(f"Motor tick: cmd={cmd}, current_angle={self.current_angle}, d_angle={d_angle}")
+        n_angle = self.current_angle
+        if cmd == MotorCMD.CCW:
+            n_angle += d_angle
+            if n_angle > (np.pi*2):
+                n_angle = n_angle-(np.pi*2)
+        if cmd == MotorCMD.CW:
+            n_angle -= d_angle
+            if n_angle < 0:
+                n_angle = (np.pi*2)+n_angle
+
+        self.current_angle = n_angle
+        angle.set(n_angle)
+        # self._logger.info(f"New angle = {n_angle}")
+    =}
+
+    reaction(m_cmd){=
+        if self.current_cmd == m_cmd.value:
+            return 0
+        
+        self.logger.debug(f"Setting motor command to {m_cmd.value}")
+        self.current_cmd = m_cmd.value
+    =}
+}
+
+reactor RBase (
+    tick_interval=1 ms, 
+    dpos_dict={=dict()=}, 
+    ang_speed=1
+) extends FrostBase{
+    input cmd
+    output angle
+    output d_pos
+    state m_cmd
+
+    m = new Motor(name={=self.name + ".motor"=},tick_interval=tick_interval, ang_speed=ang_speed)
+    md = new MDriver(name={=self.name + ".m_driver"=}, dpos_dict=dpos_dict)
+    m.angle -> md.angle
+    m.angle -> angle
+    cmd -> md.cmd
+    md.d_pos -> d_pos
+    md.m_cmd -> m.m_cmd
+}

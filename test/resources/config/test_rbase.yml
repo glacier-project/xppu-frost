@@ -1,0 +1,10 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  r_base:
+    logging_level: DEBUG
+    reactors:
+      m_driver:
+        logging_level: WARNING
+      motor:
+        logging_level: WARNING

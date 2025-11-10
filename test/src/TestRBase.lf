@@ -1,0 +1,78 @@
+target Python{
+    fast: true,
+    timeout: 180 s
+}
+
+import RBase from "../../src/crane/RBase.lf"
+
+preamble{=
+    import uuid
+    import numpy as np
+    from frost import *
+    from copy import deepcopy
+    from crane_utils import CranePos,CraneCmd
+=}
+
+preamble{=
+ANGLE_POS_S=np.pi
+ANGLE_POS_LSC=(3/2)*np.pi
+ANGLE_POS_ST=0
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
+logger = logging.getLogger("test_r_base")
+logger.setLevel(logging.DEBUG)
+=}
+
+main reactor {
+
+    state expected_positions = []
+    logical action send_cmd
+    
+    r_base = new RBase(
+        name="r_base", 
+        dpos_dict={=crane_dpos=}, 
+        tick_interval=1 ms,
+        ang_speed=0.698132 # rad/s
+    )
+
+    reaction (startup) -> send_cmd{=
+        self.expected_positions = [
+            (CranePos.POS_S, MSECS(4500)),    # Rotate to S in ~4.5s
+            (CranePos.POS_LSC, MSECS(6750)),  # Rotate to LSC in ~2.25s
+            (CranePos.POS_ST, MSECS(9000)),   # Rotate to ST in ~2.25
+            (CranePos.POS_LSC, MSECS(11250)), # Rotate to LSC in ~2.25s
+            (CranePos.POS_ST, MSECS(13500)),  # Rotate to ST in ~2.25s
+            (CranePos.POS_S, MSECS(18000))    # Rotate to S in ~4.5s
+        ]
+
+        cmd_time = 0 
+        for pos, end_time in self.expected_positions:
+            logger.debug(f"Scheduling r_base_cmd at {cmd_time} ns to position {pos}")
+            # small delay to ensure the command is processed after the previous position is reached
+            send_cmd.schedule(cmd_time + NSECS(200), pos)
+            cmd_time = end_time
+    =}
+
+    reaction (send_cmd) -> r_base.cmd{=
+        r_base.cmd.set(send_cmd.value)
+    =}
+
+    reaction (r_base.d_pos){=
+        logger.debug(f"RBase d_pos at time {lf.time.logical_elapsed()} ns: d_pos={r_base.d_pos.value}")
+
+        expected_pos, expected_time = self.expected_positions.pop(0)
+        current_time = lf.time.logical_elapsed()
+        epsilon = MSECS(1)  # Allowable timing error of 1ms
+
+        assert expected_pos == r_base.d_pos.value, f"Expected position {expected_pos}, got {r_base.d_pos.value}"
+        assert (current_time - expected_time) < epsilon, f"Expected time at least {expected_time} ns, got {current_time} ns"
+    =}
+
+    reaction (shutdown) {=
+        assert self.expected_positions == [], f"Not all expected positions were reached. Remaining: {[pos for pos, time in self.expected_positions]}"
+    =}
+}
