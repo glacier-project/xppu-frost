@@ -1,0 +1,86 @@
+target Python{
+    fast: true,
+}
+
+import MonostableCylinder from "../../src/common/MonostableCylinder.lf"
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+preamble{=
+    import uuid
+    from frost import *
+    from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+=}
+
+main reactor extends FrostBase {
+    state extension_time = 0  # Full extension time in ns
+    state retraction_time = 0  # Full retraction time in ns
+    state expected_states = []
+
+    # MC with 0.2 m/s speed and 0.01 m extension -> 0.05s = 50ms per full movement
+    mc = new MonostableCylinder(
+        name="monostable_cylinder", 
+        retraction_speed=0.2,      # m/s
+        extension_speed=0.2,       # m/s
+        extension_length=0.01,     # m (10mm)
+        is_retracted=True
+    )
+
+    logical action send_cmd
+
+    reaction (startup) -> send_cmd{=
+        # Calculate expected times
+        self.extension_time = MSECS(50)  # 0.01m / 0.2m/s = 0.05s = 50ms
+        self.retraction_time = MSECS(50)
+        self.logger.info(f"Expected extension time: {self.extension_time} ns ({self.extension_time/MSECS(1)} ms)")
+        self.logger.info(f"Expected retraction time: {self.retraction_time} ns ({self.retraction_time/MSECS(1)} ms)")
+            
+        # Test sequence:
+        # Phase 0 [0 ms]: Initial RETRACTED state
+        # Phase 1 [0 ms]: Start extension -> EXTENDING
+        # Phase 2 [25 ms]: At 25ms interrupt with RETRACT (50% extended) -> RETRACTING
+        # Phase 3 [50 ms]: RETRACTED after ~25ms
+        # Phase 4 [65 ms]: Start extension again -> EXTENDING
+        # Phase 5 [75 ms]: At 75ms interrupt with RETRACT (20% extended = 10ms in) -> RETRACTING
+        # Phase 6 [80 ms]: At 80ms interrupt with EXTEND (5ms into retraction, reverses) -> EXTENDING
+        # Phase 7 [125 ms]: EXTENDED after ~45ms (from ~10% position to 100%)
+        
+        send_cmd.schedule(MSECS(0), (MonostableCylinderCmd.EXTEND, "start_extension"))
+        send_cmd.schedule(MSECS(25), (MonostableCylinderCmd.RETRACT, "interrupt_ext_50%"))
+        send_cmd.schedule(MSECS(65), (MonostableCylinderCmd.EXTEND, "start_extension_again"))
+        send_cmd.schedule(MSECS(75), (MonostableCylinderCmd.RETRACT, "interrupt_ext_20%"))
+        send_cmd.schedule(MSECS(80), (MonostableCylinderCmd.EXTEND, "reverse_retraction"))
+
+
+        self.expected_states = [
+            (MonostableCylinderState.RETRACTED, 0),      # Phase 0
+            (MonostableCylinderState.EXTENDING, 0),      # Phase 1
+            (MonostableCylinderState.RETRACTING, 25),    # Phase 2
+            (MonostableCylinderState.RETRACTED, 50),     # Phase 3
+            (MonostableCylinderState.EXTENDING, 65),     # Phase 4
+            (MonostableCylinderState.RETRACTING, 75),    # Phase 5
+            (MonostableCylinderState.EXTENDING, 80),     # Phase 6 (reversed during retraction)
+            (MonostableCylinderState.EXTENDED, 125),     # Phase 7 (from ~10% to 100% = ~45ms)
+        ]
+    =}
+
+
+    reaction (mc.s) -> mc.cmd{=
+        state = mc.s.value
+        expected_state, expected_time = self.expected_states.pop(0)
+        epsilon = MSECS(1)  # Allowable timing error of 1ms
+
+        self.logger.warning(f"State change: {state.name} (expected: {expected_state.name}, time: {expected_time} ns)")
+        assert state == expected_state, f"Expected state {expected_state.name}, got {state.name}"
+        assert (lf.time.logical_elapsed() - MSECS(expected_time)) < epsilon, f"Expected time at least {expected_time} ns, got {lf.time.logical_elapsed()} ns"
+    =}
+
+    reaction (send_cmd) -> mc.cmd{=
+        cmd, description = send_cmd.value
+        self.logger.info(f"Interrupt: {description} - sending {cmd.name}")
+        mc.cmd.set(cmd)
+    =}
+
+    reaction (shutdown) {=
+        assert len(self.expected_states) == 0, f"Not all expected states were reached. Remaining: {[(state, time) for state, time in self.expected_states]}"
+    =}
+}

@@ -17,7 +17,7 @@ main reactor {
     state cmd_time = 0
 
 
-    mc = new MonostableCylinder(name="monostable_cylinder", _is_retracted=True)
+    mc = new MonostableCylinder(name="monostable_cylinder", is_retracted=True)
 
     reaction (mc.s) -> mc.cmd{=
 

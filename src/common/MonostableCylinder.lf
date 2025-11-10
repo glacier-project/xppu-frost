@@ -7,138 +7,226 @@ target Python{
 import FrostBase from "../../frost/src/lib/FrostBase.lf";
 
 reactor MonostableCylinder(
-    _retraction_speed=0.2, # m/s
-    _extension_speed=0.2, # m/s
-    _extension_length=0.010, # m
-    _is_retracted=True
+    retraction_speed=0.2, # m/s
+    extension_speed=0.2, # m/s
+    extension_length=0.010, # m
+    is_retracted=True
 )  extends FrostBase{
 
     input cmd 
     output s 
 
-    state retraction_speed = _retraction_speed
-    state extension_speed = _extension_speed
-    state extension_length = _extension_length
-    state is_retracted = _is_retracted
+    state _retraction_speed = retraction_speed
+    state _extension_speed = extension_speed
+    state _extension_length = extension_length
+    state _is_retracted = is_retracted
     
-    state mc_state 
-    state retraction_time 
-    state extension_time
-    state transition_start_time
-    state current_cmd
+    # Current state (RETRACTED, EXTENDING, EXTENDED, RETRACTING)
+    state mc_state                  
+    # Full retraction time in ns
+    state retraction_time           
+    # Full extension time in ns
+    state extension_time            
+    # Last command received
+    state current_cmd               
+    # (state, start_time, end_time) - tracks the current state
+    state current_transition        
+    # Next scheduled transition to verify validity
+    state scheduled_transition      
 
     logical action update_state
 
     // @label _initialize_timings
     reaction (startup) -> s{=
-        self.logger.info("Initializing MonostableCylinder... Using parameters: "
-                         f"retraction_speed={self.retraction_speed} m/s, "
-                         f"extension_speed={self.extension_speed} m/s, "
-                         f"extension_length={self.extension_length} m, "
-                         f"initially_retracted={self.is_retracted}")
-        self.retraction_time = convert_time(self.extension_length / self.retraction_speed, TimePrecision.SECS, TimePrecision.NSECS)
-        self.extension_time = convert_time(self.extension_length / self.extension_speed, TimePrecision.SECS, TimePrecision.NSECS)
-        self.mc_state = MonostableCylinderState.RETRACTED if self.is_retracted else MonostableCylinderState.EXTENDED
-        self.current_cmd = MonostableCylinderCmd.RETRACT if self.is_retracted else MonostableCylinderCmd.EXTEND
+        self.logger.info(
+            "Initializing MonostableCylinder... Using parameters: "
+            f"retraction_speed={self._retraction_speed} m/s, "
+            f"extension_speed={self._extension_speed} m/s, "
+            f"extension_length={self._extension_length} m, "
+            f"initially_retracted={self._is_retracted}"
+        )
+        
+        # Calculate timing values
+        self._retraction_time = convert_time(
+            self._extension_length / self._retraction_speed, 
+            TimePrecision.SECS, 
+            TimePrecision.NSECS
+        )
+        self._extension_time = convert_time(
+            self._extension_length / self._extension_speed, 
+            TimePrecision.SECS, 
+            TimePrecision.NSECS
+        )
+        
+        # Set initial state
+        self.mc_state = MonostableCylinderState.RETRACTED if self._is_retracted else MonostableCylinderState.EXTENDED
+        self.current_cmd = MonostableCylinderCmd.RETRACT if self._is_retracted else MonostableCylinderCmd.EXTEND
 
-        self.logger.info(f"MonostableCylinder initialized with retraction_time={self.retraction_time} ns, extension_time={self.extension_time} ns, initial_state={self.mc_state.name}")
+        self.logger.info(
+            f"MonostableCylinder initialized with "
+            f"retraction_time={self._retraction_time} ns, "
+            f"extension_time={self._extension_time} ns, "
+            f"initial_state={self.mc_state.name}"
+        )
 
         s.set(self.mc_state)
     =}
 
-    // @label _update_state
+    # Calculates the time required to transition to the target state based on the current state and elapsed time during movement.
+    method get_transition_time_to(mc_state){=
+        current_transition = self.current_transition
+        current_state = self.mc_state
+        
+        self.logger.info(
+            f"Computing transition time from {current_state.name} to {mc_state.name}. "
+            f"Current transition: {current_transition}"
+        )
+
+        # Full extension from fully retracted
+        if current_state == MonostableCylinderState.RETRACTED and mc_state == MonostableCylinderState.EXTENDED:
+            return self._extension_time
+        
+        # Full retraction from fully extended
+        elif current_state == MonostableCylinderState.EXTENDED and mc_state == MonostableCylinderState.RETRACTED:
+            return self._retraction_time
+        
+        # Extending from partial retraction (reverse direction)
+        elif current_state == MonostableCylinderState.RETRACTING and mc_state == MonostableCylinderState.EXTENDED:
+            elapsed_time = lf.time.logical_elapsed() - current_transition[1]
+            # Extension time proportional to retraction progress
+            remaining_time = int(round(self._extension_time * (elapsed_time / self._retraction_time)))
+            return min(remaining_time, self._extension_time)
+        
+        # Retracting from partial extension (reverse direction)
+        elif current_state == MonostableCylinderState.EXTENDING and mc_state == MonostableCylinderState.RETRACTED:
+            elapsed_time = lf.time.logical_elapsed() - current_transition[1]
+            # Retraction time proportional to extension progress
+            remaining_time = int(round(self._retraction_time * (elapsed_time / self._extension_time)))
+            return min(remaining_time, self._retraction_time)
+        
+        else:
+            raise Exception(f"Invalid state transition request from {current_state.name} to {mc_state.name}")
+    =}
+
+    # @label _update_state
     reaction (update_state) -> s, update_state{=
-        new_state = update_state.value
+        transition = update_state.value
+        new_state = transition[0]
         current_cmd = self.current_cmd
         current_state = self.mc_state
+        current_time = lf.time.logical_elapsed()
 
-        if new_state == MonostableCylinderState.EXTENDED and current_cmd == MonostableCylinderCmd.RETRACT:
-            return 0  # Ignore invalid transition
-        if new_state == MonostableCylinderState.RETRACTED and current_cmd == MonostableCylinderCmd.EXTEND:
-            return 0  # Ignore invalid transition
+        # Verify this transition is still valid (not superseded by a new command)
+        if transition != self.scheduled_transition:
+            self.logger.debug(f"Ignoring outdated transition: {transition} != {self.scheduled_transition}")
+            return 0
 
+        # Transitioning to EXTENDING state
         if new_state == MonostableCylinderState.EXTENDING:
             assert current_cmd == MonostableCylinderCmd.EXTEND, "EXTENDING state requires EXTEND command"
-            transition_start_time = lf.time.logical_elapsed()
-
-            extension_time = 0
-            if current_state == MonostableCylinderState.RETRACTED:
-                # full time
-                extension_time = self.extension_time
-            elif current_state == MonostableCylinderState.RETRACTING:
-                # calculate remaining time based on elapsed time
-                elapsed_time = lf.time.logical_elapsed() - self.transition_start_time
-                remaining_time = max(0, self.extension_time - elapsed_time)
-                extension_time = remaining_time
-            else:
-                raise Exception("Invalid state transition to EXTENDING")
             
-            update_state.schedule(extension_time, MonostableCylinderState.EXTENDED)
+            extension_time = self.get_transition_time_to(MonostableCylinderState.EXTENDED)
             
+            # Schedule completion of extension
+            next_transition = (MonostableCylinderState.EXTENDED, current_time, current_time + extension_time)
+            update_state.schedule(extension_time, next_transition)
+            self.scheduled_transition = next_transition
+        
+        # Transitioning to RETRACTING state
         elif new_state == MonostableCylinderState.RETRACTING:
             assert current_cmd == MonostableCylinderCmd.RETRACT, "RETRACTING state requires RETRACT command"
-            transition_start_time = lf.time.logical_elapsed()
             
-            retraction_time = 0
-            if current_state == MonostableCylinderState.EXTENDED:
-                # full time
-                retraction_time = self.retraction_time
-            elif current_state == MonostableCylinderState.EXTENDING:
-                # calculate remaining time based on elapsed time
-                elapsed_time = lf.time.logical_elapsed() - self.transition_start_time
-                remaining_time = max(0, self.retraction_time - elapsed_time)
-                retraction_time = remaining_time
-            else:
-                raise Exception("Invalid state transition to RETRACTING")
-            update_state.schedule(retraction_time, MonostableCylinderState.RETRACTED)
+            retraction_time = self.get_transition_time_to(MonostableCylinderState.RETRACTED)
+            
+            # Schedule completion of retraction
+            next_transition = (MonostableCylinderState.RETRACTED, current_time, current_time + retraction_time)
+            update_state.schedule(retraction_time, next_transition)
+            self.scheduled_transition = next_transition
+        
+        # Final states (EXTENDED or RETRACTED)
         else:
-            assert new_state in [MonostableCylinderState.RETRACTED, MonostableCylinderState.EXTENDED], "Invalid target state"
+            assert new_state in [MonostableCylinderState.RETRACTED, MonostableCylinderState.EXTENDED], \
+                f"Invalid target state: {new_state}"
 
+        # Update state and notify
         self.logger.info(f"Transitioning from {self.mc_state.name} to {new_state.name}")
         self.mc_state = new_state
+        self.current_transition = transition
         s.set(new_state)
     =}
 
-    // @label _handle_cmd
+    # @label _handle_cmd
     reaction (cmd) -> update_state{=
-
         state = self.mc_state
         command = cmd.value
         self.current_cmd = command
+        current_time = lf.time.logical_elapsed()
 
         self.logger.info(f"Current state: {state.name}, Received command: {command.name}")
 
+        # --- RETRACTED state ---
         if state == MonostableCylinderState.RETRACTED:
             if command == MonostableCylinderCmd.EXTEND:
-                update_state.schedule(0, MonostableCylinderState.EXTENDING)
+                transition = (
+                    MonostableCylinderState.EXTENDING, 
+                    current_time, 
+                    current_time + self.get_transition_time_to(MonostableCylinderState.EXTENDED)
+                )
+                update_state.schedule(0, transition)
+                self.scheduled_transition = transition
             elif command == MonostableCylinderCmd.RETRACT:
                 self.logger.info("Already in RETRACTED state. No action taken.")
             else:
-                raise Exception("Invalid command")
+                raise Exception(f"Invalid command: {command}")
+        
+        # --- EXTENDED state ---
         elif state == MonostableCylinderState.EXTENDED:
             if command == MonostableCylinderCmd.RETRACT:
-                update_state.schedule(0, MonostableCylinderState.RETRACTING)
+                transition = (
+                    MonostableCylinderState.RETRACTING, 
+                    current_time, 
+                    current_time + self.get_transition_time_to(MonostableCylinderState.RETRACTED)
+                )
+                update_state.schedule(0, transition)
+                self.scheduled_transition = transition
             elif command == MonostableCylinderCmd.EXTEND:
                 self.logger.info("Already in EXTENDED state. No action taken.")
             else:
-                raise Exception("Invalid command")
+                raise Exception(f"Invalid command: {command}")
+        
+        # --- RETRACTING state (can reverse to EXTENDING) ---
         elif state == MonostableCylinderState.RETRACTING:
             if command == MonostableCylinderCmd.RETRACT:
-                self.logger.info("Currently RETRACTING. Command will be processed upon completion.")
+                self.logger.info("Currently RETRACTING. No action taken.")
             elif command == MonostableCylinderCmd.EXTEND:
-                self.logger.info("Transitioning to EXTENDING state from RETRACTING.")
-                update_state.schedule(0, MonostableCylinderState.EXTENDING)
+                self.logger.info("Reversing direction: RETRACTING -> EXTENDING")
+                transition = (
+                    MonostableCylinderState.EXTENDING, 
+                    current_time, 
+                    current_time + self.get_transition_time_to(MonostableCylinderState.EXTENDED)
+                )
+                update_state.schedule(0, transition)
+                self.scheduled_transition = transition
             else:
-                raise Exception("Invalid command")
+                raise Exception(f"Invalid command: {command}")
+        
+        # --- EXTENDING state (can reverse to RETRACTING) ---
         elif state == MonostableCylinderState.EXTENDING:
             if command == MonostableCylinderCmd.EXTEND:
-                self.logger.info("Currently EXTENDING. Command will be processed upon completion.")
+                self.logger.info("Currently EXTENDING. No action taken.")
             elif command == MonostableCylinderCmd.RETRACT:
-                self.logger.info("Transitioning to RETRACTING state from EXTENDING.")
-                update_state.schedule(0, MonostableCylinderState.RETRACTING)
+                self.logger.info("Reversing direction: EXTENDING -> RETRACTING")
+                transition = (
+                    MonostableCylinderState.RETRACTING, 
+                    current_time, 
+                    current_time + self.get_transition_time_to(MonostableCylinderState.RETRACTED)
+                )
+                update_state.schedule(0, transition)
+                self.scheduled_transition = transition
             else:
-                raise Exception("Invalid command")
+                raise Exception(f"Invalid command: {command}")
+        
         else:
-            raise Exception("Invalid state")
+            raise Exception(f"Invalid state: {state}")
     =}
 }

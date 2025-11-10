@@ -4,6 +4,6 @@ reactors:
   monostable_cylinder:
     logging_level: DEBUG
     parameters:
-      retraction_speed: 0.1 # m/s
-      extension_speed: 0.1 # m/s
-      extension_length: 0.1 # m
+      _retraction_speed: 0.1 # m/s
+      _extension_speed: 0.1 # m/s
+      _extension_length: 0.1 # m
