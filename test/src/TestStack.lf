@@ -5,24 +5,24 @@ target Python{
 import Stack from "../../src/stack/Stack.lf"
 
 preamble{=
-    import uuid
-    from frost import *
-    from f_compare import *
-    from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
-    from shape import Shape, CircleShape, RectangularShape, MaterialSquareShape, ComponentShape, ConveyorBeltShape, Point
-    from shape_util import set_wp_coordinates_to
-    from stack import StackCmd
-    from material import Position, Material, SteelMaterial, PlasticMaterial
-    from copy import deepcopy
-=}
+import uuid
+from frost import *
+from f_compare import *
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from shape import Shape, CircleShape, RectangularShape, MaterialSquareShape, ComponentShape, ConveyorBeltShape, Point
+from shape_util import set_wp_coordinates_to
+from stack import StackCmd
+from material import Position, Material, SteelMaterial, PlasticMaterial
+from copy import deepcopy
 
-preamble{=
+logger = logging.getLogger("test_stack")
+logger.setLevel(logging.DEBUG)
 stack_wps = [
     SteelMaterial(id=str(uuid.uuid4())),
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
-print(f"Initialized stack WPs: {stack_wps}")
+logger(f"Initialized stack WPs: {stack_wps}")
 =}
 
 main reactor {
@@ -36,7 +36,7 @@ main reactor {
     =}
 
     reaction (request_wp) -> s.provide_wp{=
-        print("Requesting WP from Stack")
+        logger("Requesting WP from Stack")
         s.provide_wp.set(True)
     =}
 
@@ -52,7 +52,7 @@ main reactor {
     =}
 
     reaction (s.is_empty) {=
-        print("Stack is empty")
+        logger("Stack is empty")
         assert s.is_empty.value == True, "Expected stack to be empty"
         assert self.wp_index == len(stack_wps), f"Expected {len(stack_wps)} WPs, got {self.wp_index}"
     =}
