@@ -1,0 +1,104 @@
+target Python{
+    fast: true,
+    timeout: 180 s,
+    files: [
+        "../../src/python-lib/material.py",
+        "../../src/python-lib/shape.py",
+        "../../src/python-lib/f_compare.py"
+    ]
+}
+
+import Crane from "../../src/crane/Crane.lf"
+
+preamble{=
+import uuid
+from frost import *
+from material import SteelMaterial, Material
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from crane_utils import CraneCmd
+from copy import deepcopy
+from shape import Point
+
+logger = logging.getLogger("test_crane")
+logger.setLevel(logging.DEBUG)
+=}
+
+main reactor {
+
+    state wp = {= SteelMaterial(id=str(uuid.uuid4())) =}
+    state cmds = []
+    logical action send_cmd
+
+    c = new Crane(
+        name="crane"
+    )
+
+    reaction (startup) -> send_cmd, c.wp_in_stack{=
+        # Set material in stack area
+        c.wp_in_stack.set(self.wp)
+
+        self.cmds = [
+            (CraneCmd.ROTATE_S, CranePos.POS_S, MSECS(4500)),    # Rotate to S in ~4.5s
+            (CraneCmd.PICKUP_WP, CranePos.POS_S, MSECS(4800)),  # Pickup WP at S
+            (CraneCmd.ROTATE_LSC, CranePos.POS_LSC, MSECS(7050)),  # Rotate to LSC in ~2.25s
+            (CraneCmd.PUTDOWN_WP, CranePos.POS_LSC, MSECS(7350)),  # Putdown WP at LSC
+            (CraneCmd.ROTATE_ST, CranePos.POS_ST, MSECS(9600)),   # Rotate to ST in ~2.25
+            (CraneCmd.ROTATE_LSC, CranePos.POS_LSC, MSECS(12850)), # Rotate to LSC in ~2.25s
+            (CraneCmd.PICKUP_WP, CranePos.POS_LSC, MSECS(13150)),  # Pickup WP at LSC
+            (CraneCmd.ROTATE_ST, CranePos.POS_ST, MSECS(15400)),  # Rotate to ST in ~2.25s
+            (CraneCmd.PUTDOWN_WP, CranePos.POS_ST, MSECS(15700)),  # Putdown WP at ST
+            (CraneCmd.PICKUP_WP, CranePos.POS_ST, MSECS(16000)),  # Pickup WP at ST
+            (CraneCmd.ROTATE_S, CranePos.POS_S, MSECS(20500)),    # Rotate to S in ~4.5s
+            (CraneCmd.PUTDOWN_WP, CranePos.POS_S, MSECS(20800))   # Putdown WP at S
+        ]
+
+        cmd_time = 0 
+        for crane_cmd, expected_pos, end_time in self.cmds:
+            logger.debug(f"Scheduling r_base_cmd at {cmd_time} ns to position {expected_pos}")
+            # small delay to ensure the command is processed after the previous position is reached
+            send_cmd.schedule(cmd_time + NSECS(200), crane_cmd)
+            cmd_time = end_time
+    =}
+
+    reaction (send_cmd) -> c.cmd{=
+        c.cmd.set(send_cmd.value)
+    =}
+
+    reaction (c.position){=
+        position = c.position.value
+        logger.debug(f"Crane position at time {lf.time.logical_elapsed()} ns: position={position}")
+
+        crane_cmd, expected_pos, expected_time = self.cmds.pop(0)
+        current_time = lf.time.logical_elapsed()
+        epsilon = MSECS(1)  # Allowable timing error of 1ms
+
+        assert expected_pos == position, f"Expected position {expected_pos}, got {position}"
+        assert (current_time - expected_time) < epsilon, f"Expected time at least {expected_time} ns, got {current_time} ns"
+    =}
+
+    reaction (c.current_wp, c.wp_out_stack, c.wp_out_stamp, c.wp_out_lsc) {=
+        crane_cmd, expected_pos, expected_time = self.cmds.pop(0)
+
+        logger.debug(f"Crane WP reaction at time {lf.time.logical_elapsed()} ns: current_wp={c.current_wp.value}, wp_out_stack={c.wp_out_stack.value}, wp_out_stamp={c.wp_out_stamp.value}, wp_out_lsc={c.wp_out_lsc.value}")
+        
+        if crane_cmd == CraneCmd.PICKUP_WP:
+            assert c.current_wp.is_present, "Expected WP to be held by crane after PICKUP_WP command"
+            assert sum([c.wp_out_stack.is_present, c.wp_out_stamp.is_present, c.wp_out_lsc.is_present]) == 0, "WP should not be output at any location when held by crane"
+            wp = c.current_wp.value
+        elif crane_cmd == CraneCmd.PUTDOWN_WP:
+            assert not c.current_wp.is_present, "Expected crane to not hold WP after PUTDOWN_WP command"
+            assert sum([c.wp_out_stack.is_present, c.wp_out_stamp.is_present, c.wp_out_lsc.is_present]) == 1, "WP should only be output at one location at a time"
+            if c.wp_out_stack.is_present:
+                wp = c.wp_out_stack.value
+            elif c.wp_out_stamp.is_present:
+                wp = c.wp_out_stamp.value
+            elif c.wp_out_lsc.is_present:
+                wp = c.wp_out_lsc.value
+        
+        assert wp == self.wp, f"Expected WP {self.wp}, got {wp}"
+    =}
+
+    reaction (shutdown) {=
+        assert self.cmds == [], f"Not all expected positions were reached. Remaining: {[pos for pos, time in self.cmds]}"
+    =}
+}

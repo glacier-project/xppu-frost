@@ -12,6 +12,7 @@ class CraneCmd(str, Enum):
     PICKUP_WP = "PICKUP_WP",
     PUTDOWN_WP = "PUTDOWN_WP"
 
+# TODO: Add NONE position
 class CranePos(str, Enum):
     POS_S = "POS_S"
     POS_LSC = "POS_LSC"

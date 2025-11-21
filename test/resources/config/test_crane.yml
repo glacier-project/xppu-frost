@@ -1,0 +1,20 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  crane:
+    logging_level: INFO
+    reactors:
+      r_base:
+        logging_level: WARNING
+        reactors:
+          m_driver:
+            logging_level: WARNING
+          motor:
+            logging_level: WARNING
+    #   monostable_cylinder:
+    #     logging_level: DEBUG
+    #     parameters:
+    #       _retraction_speed: 223.684 # m/s
+    #       _extension_speed: 472.222 # m/s
+    #       _extension_length: 0.07 # m
+    #       _is_retracted: true
