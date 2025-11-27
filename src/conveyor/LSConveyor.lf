@@ -1,0 +1,169 @@
+target Python{
+    files: [
+        "../python-lib/conveyor_utils.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/monostable_cylinder.py",
+        "../python-lib/guard.py",
+    ]
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+import Conveyor from "Conveyor.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point
+from material import Material
+from position_sensor import PositionSensor
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from guard import Guard
+from conveyor_utils import LSCCmdType, ConveyorCmd
+=}
+
+reactor LSConveyor extends Conveyor{
+    preamble{=
+        PS_WIDTH = 0.016
+        PS_LENGTH = 0.055
+        PSS_OFFSET = 0.18
+        PSM_OFFSET = 0.365
+        # PSE_OFFSET = 0.565
+        MC_RS_OFFSET = 0.245
+        MC_PAC_OFFSET = 0.415
+        MC_RM_OFFSET = 0.515
+        MC_AREA_WIDTH = 0.016
+        MC_AREA_LENGTH = 0.055
+    =}
+
+    output wp_out_ramp_start
+    output wp_out_ramp_mid
+    output wp_out_pac
+    
+    mc_ramp_start = new MonostableCylinder(
+        name="mc_ramp_start",     
+        retraction_speed=223.684, # m/s t= 0.38ms 
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=True
+    )
+    mc_pac = new MonostableCylinder(
+        name="mc_pac",     
+        retraction_speed=223.684, # m/s t= 0.38ms 
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=True
+    )
+    mc_ramp_mid = new MonostableCylinder(
+        name="mc_ramp_mid",     
+        retraction_speed=274.194, # m/s t= 0.38ms 
+        extension_speed=531.25, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=True
+    )
+    
+    state _position_sensor_start = {=PositionSensor(name="ps-start", working_area=self._conveyor_shape.get_sensor_shape(self.PSS_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+    state _mc_ramp_start_delay
+    state _mc_ramp_start_area = {= self._conveyor_shape.get_sensor_shape(self.MC_RS_OFFSET, self.MC_AREA_WIDTH, self.MC_AREA_LENGTH) =}
+    state _mc_ramp_start_guard = {= Guard(name="mc-start-guard", guard_area=self._mc_ramp_start_area) =}
+    state _wp_to_ramp_start
+
+    state _position_sensor_mid = {=PositionSensor(name="ps-mid", working_area=self._conveyor_shape.get_sensor_shape(self.PSM_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    state _mc_pac_delay
+    state _mc_pac_area = {= self._conveyor_shape.get_sensor_shape(self.MC_PAC_OFFSET, self.MC_AREA_WIDTH, self.MC_AREA_LENGTH) =}
+    state _mc_pac_guard = {= Guard(name="mc-pac-guard", guard_area=self._mc_pac_area) =}
+    state _wp_to_pac
+
+    state _mc_ramp_mid_delay
+    state _mc_ramp_mid_area = {= self._conveyor_shape.get_sensor_shape(self.MC_RM_OFFSET, self.MC_AREA_WIDTH, self.MC_AREA_LENGTH) =}
+    state _mc_ramp_mid_guard = {= Guard(name="mc-mid-guard", guard_area=self._mc_ramp_mid_area) =}
+    state _wp_to_ramp_mid
+
+    reaction (startup) {=
+        # Add PS triggers for MC Ramp Start
+        self._mc_ramp_start_delay = convert_time((self.MC_RS_OFFSET+self.MC_AREA_WIDTH/2-self.PSS_OFFSET)/self.speed, TimePrecision.SECS, TimePrecision.NSECS)
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_start,
+            triggering_cmd=LSCCmdType.T_TO_RAMP_START,
+            target_action="activate_mc_ramp_start",
+            delay=self._mc_ramp_start_delay
+        )
+        self.add_guard(self._mc_ramp_start_guard)
+
+        # Add PS triggers for MC PAC
+        self._mc_pac_delay = convert_time((self.MC_PAC_OFFSET+self.MC_AREA_WIDTH/2-self.PSM_OFFSET)/self.speed, TimePrecision.SECS, TimePrecision.NSECS)
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_mid,
+            triggering_cmd=LSCCmdType.T_TO_PAC,
+            target_action="activate_mc_pac",    
+            delay=self._mc_pac_delay
+        )
+
+        # Add PS triggers for MC Ramp Mid
+        self._mc_ramp_mid_delay = convert_time((self.MC_RM_OFFSET+self.MC_AREA_WIDTH/2-self.PSM_OFFSET)/self.speed, TimePrecision.SECS, TimePrecision.NSECS)
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_mid,
+            triggering_cmd=LSCCmdType.T_TO_RAMP_MID,
+            target_action="activate_mc_ramp_mid",
+            delay=self._mc_ramp_mid_delay
+        )
+        self.add_guard(self._mc_ramp_mid_guard)
+    =}
+
+    // @label handle_ps_actions
+    reaction (trigger_ps_action) -> mc_ramp_start.cmd, mc_pac.cmd, mc_ramp_mid.cmd{=
+        action, wp = trigger_ps_action.value
+
+        if action == "activate_mc_ramp_start":
+            self.logger.debug("Activating MC Ramp Start")
+            mc_ramp_start.cmd.set(MonostableCylinderCmd.EXTEND)
+            self._wp_to_ramp_start = wp
+        elif action == "activate_mc_pac":
+            self.logger.debug("Activating MC PAC")
+            mc_pac.cmd.set(MonostableCylinderCmd.EXTEND)
+            self._wp_to_pac = wp
+        elif action == "activate_mc_ramp_mid":
+            self.logger.debug("Activating MC Ramp Mid")
+            mc_ramp_mid.cmd.set(MonostableCylinderCmd.EXTEND)
+            self._wp_to_ramp_mid = wp
+    =}
+
+    // @label handle_mc_ramp_start_state_update
+    reaction (mc_ramp_start.s) -> mc_ramp_start.cmd, wp_out_ramp_start{=
+        self.handle_mc_state_update(
+            mc_state=mc_ramp_start.s.value,
+            mc_guard=self._mc_ramp_start_guard,
+            cmd_type=LSCCmdType.T_TO_RAMP_START,
+            expected_wp=self._wp_to_ramp_start,
+            mc_cmd_evt=mc_ramp_start.cmd,
+            wp_out_evt=wp_out_ramp_start
+        )
+    =}
+
+    // @label handle_mc_ramp_mid_state_update
+    reaction (mc_ramp_mid.s) -> mc_ramp_mid.cmd, wp_out_ramp_mid {=
+        self.handle_mc_state_update(
+            mc_state=mc_ramp_mid.s.value,
+            mc_guard=self._mc_ramp_mid_guard,
+            cmd_type=LSCCmdType.T_TO_RAMP_MID,
+            expected_wp=self._wp_to_ramp_mid,
+            mc_cmd_evt=mc_ramp_mid.cmd,
+            wp_out_evt=wp_out_ramp_mid
+        )
+    =}
+
+    // @label handle_mc_pac_state_update
+    reaction (mc_pac.s) -> mc_pac.cmd, wp_out_pac {=
+        self.handle_mc_state_update(
+            mc_state=mc_pac.s.value,
+            mc_guard=self._mc_pac_guard,
+            cmd_type=LSCCmdType.T_TO_PAC,
+            expected_wp=self._wp_to_pac,
+            mc_cmd_evt=mc_pac.cmd,
+            wp_out_evt=wp_out_pac
+        )
+    =}
+}

@@ -1,0 +1,63 @@
+target Python{
+    fast: true,
+    timeout: 180 s,
+    // files: [    ]
+}
+
+import LSConveyor from "../../src/conveyor/LSConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial
+
+logger = logging.getLogger("test_lscconveyor")
+logger.setLevel(logging.DEBUG)
+=}
+
+main reactor TestLSConveyor {
+
+    state wp_index = 0    
+    state wps = {=
+        [
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_RAMP_START),
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_PAC), 
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_RAMP_MID), 
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_END)
+        ]
+    =}
+    state c_wps_received = []
+
+    timer add_wps(0 ms, 100 ms) 
+    
+    c = new LSConveyor(name="lsc")
+
+    reaction (add_wps) -> c.wp_in_start, c.cmd{=
+        if self.wp_index >= len(self.wps):
+            return 0 # No more WPs to add
+
+        wp, wp_cmd_type = self.wps[self.wp_index]
+        self.wp_index += 1
+        c.wp_in_start.set(wp)
+        c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
+        logger.debug(f"Added WP {wp} to LSConveyor with command {wp_cmd_type}")
+    =}
+
+    reaction (c.wp_out_ramp_start, c.wp_out_pac, c.wp_out_ramp_mid, c.wp_out_end) {=
+        if c.wp_out_ramp_start.is_present:
+            logger.debug(f"Received WP {c.wp_out_ramp_start.value} from ramp start")
+            self.c_wps_received.append((c.wp_out_ramp_start.value, LSCCmdType.T_TO_RAMP_START))
+        if c.wp_out_pac.is_present:
+            logger.debug(f"Received WP {c.wp_out_pac.value} from PAC")
+            self.c_wps_received.append((c.wp_out_pac.value, LSCCmdType.T_TO_PAC))
+        if c.wp_out_ramp_mid.is_present:
+            logger.debug(f"Received WP {c.wp_out_ramp_mid.value} from ramp mid")
+            self.c_wps_received.append((c.wp_out_ramp_mid.value, LSCCmdType.T_TO_RAMP_MID))
+        if c.wp_out_end.is_present:
+            logger.debug(f"Received WP {c.wp_out_end.value} from conveyor end")
+            self.c_wps_received.append((c.wp_out_end.value, LSCCmdType.T_TO_END))
+    =}
+
+    reaction (shutdown) {=
+        assert self.c_wps_received == self.wps, f"Expected WPs {self.wps}, but received {self.c_wps_received}"
+    =}
+}

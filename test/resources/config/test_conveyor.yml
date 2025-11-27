@@ -1,0 +1,13 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  conveyor:
+    logging_level: DEBUG
+    parameters:
+      _speed: 0.185 # m/s
+      _is_on: true
+  conveyor_reverse:
+    logging_level: DEBUG
+    parameters:
+      _speed: -0.185 # m/s
+      _is_on: true

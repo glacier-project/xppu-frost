@@ -1,0 +1,240 @@
+target Python{
+    files: [
+        "../python-lib/conveyor_utils.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/position_sensor.py",
+    ]
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point
+from material import Material
+from position_sensor import PositionSensor
+=}
+
+reactor Conveyor(
+    tick_interval=20 ms,            # ns
+    ref_x = 0,                      # m
+    ref_y = 0,                      # m
+    c_angle = {= (3/2)*np.pi =},    # radians
+    length = 0.60,                  # m
+    width = 0.055,                  # m
+    speed = 0.185                   # m/s
+) extends FrostBase{
+
+    input wp_in_start
+    input wp_in_end
+    input cmd 
+    
+    output wp_out_start
+    output wp_out_end
+
+    timer tick(tick_interval, tick_interval)
+    logical action trigger_ps_action
+
+    state _wps = []
+    state _is_on = False
+    state _cos_c_angle = {= cos(self.c_angle, 1e-5) =}
+    state _sin_c_angle = {= sin(self.c_angle, 1e-5) =}
+    state _conveyor_shape = {= ConveyorBeltShape(centroid_pos=Point(self.ref_x+self.length/2, self.ref_y+self.width/2, 0), base=self.length, height=self.width, angle=self.c_angle) =}
+    state _guards = []
+    state _ps_triggers = []
+    state _active_cmds = {= {  } =}
+
+    method add_guard(guard){=
+        """Adds a guard to the conveyor to control workpiece flow.
+        
+        Args:
+            guard (Guard): The guard to be added.
+        """
+        
+        assert isinstance(guard, Guard)
+        self._guards.append(guard)
+    =}
+
+    method register_position_sensor_trigger(sensor, triggering_cmd, target_action, delay){=
+        """
+        Registers a rule that triggers an action when a position sensor detects
+        a workpiece while a specific command is active.
+        
+        Args:
+            sensor (PositionSensor): PositionSensor instance to monitor.
+            triggering_cmd (ConveyorCmd): Command that must be active for the trigger to fire.
+            target_action (str): Action to schedule when triggered.
+            delay (int): Time delay in ns after detection to schedule the action.
+        """
+        self._ps_triggers.append((sensor, triggering_cmd, target_action, delay))
+    =}
+
+    method handle_mc_state_update(mc_state, mc_guard, cmd_type, expected_wp, mc_cmd_evt, wp_out_evt){=
+        """Controls workpiece flow based on the monostable cylinder (MC) state
+        and active commands.
+
+        Args:
+            mc_state (MonostableCylinderState): Current state of the MC.
+            mc_guard (Guard): Guard associated with the MC.
+            cmd_type (ConveyorCmd): Command type to check for active workpieces.
+            expected_wp (Material): Workpiece expected to be in the MC area.
+            mc_cmd_evt (event): Event to send commands to the MC.
+            wp_out_evt (event): Event to output workpieces that exit.
+        """
+        
+        if mc_state == MonostableCylinderState.EXTENDING:
+            # Activate guard stopping WPs 
+            mc_guard.activate()
+            mc_guard.allow_wp(expected_wp)
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # Deactivate guard allowing WPs to pass
+            mc_guard.deactivate()
+
+        if mc_state == MonostableCylinderState.EXTENDED:
+            # Check for WPs in the area
+            intersecting_wps = [wp for wp in self._wps if mc_guard.guard_area.intersects(wp.shape) and wp in self._active_cmds and self._active_cmds[wp].cmd_type == cmd_type]
+
+            assert len(intersecting_wps) <= 1, f"More than one WP {intersecting_wps} in MC area with command {cmd_type}, expected at most one."
+
+            mc_cmd_evt.set(MonostableCylinderCmd.RETRACT)
+
+            if len(intersecting_wps) == 1:
+                wp = intersecting_wps[0]
+                self.remove_wp(wp, wp_out_evt)
+                self.logger.debug(f"WP {wp} exited conveyor at position {wp.shape.centroid_pos} with command {cmd_type}")
+    =}
+
+    method insert_wp(wp){=
+        """Inserts a workpiece onto the conveyor.
+
+        Args:
+            wp (Material): The workpiece to insert.
+        """
+        dx_sign = -np.sign(self._cos_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS)))
+        dy_sign = -np.sign(self._sin_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS)))
+
+        self._wps.append(wp)
+        self._wps.sort(key=lambda wp: (dx_sign*wp.shape.centroid_pos.x,dy_sign*wp.shape.centroid_pos.y))
+    =}
+
+    method remove_wp(wp, output_evt){=
+        """Removes a workpiece from the conveyor and outputs it.
+
+        Args:
+            wp (Material): The workpiece to remove.
+            output_evt (event): Event to output the removed workpiece.
+        """
+        self._wps.remove(wp)
+
+        # remove any active commands for this WP
+        if wp in self._active_cmds:
+            self.remove_cmd(wp)
+
+        output_evt.set(wp)
+    =}
+
+    method add_cmd(cmd){=
+        """Adds a command for a specific workpiece to the conveyor.
+
+        Args:
+            cmd (ConveyorCmd): The command to add.
+        """
+        self.logger.info(f"Adding command {cmd} for WP {cmd.wp}")
+        self._active_cmds[cmd.wp] = cmd
+        self._is_on = True
+    =}
+
+    method remove_cmd(wp){=
+        """Removes the command associated with a specific workpiece.
+
+        Args:
+            wp (Material): The workpiece whose command is to be removed.
+        """
+        del self._active_cmds[wp]
+        if len(self._active_cmds) == 0:
+            self._is_on = False
+    =}
+
+    // @label set_cmd
+    reaction (cmd) {=
+        cmd = cmd.value
+
+        self.add_cmd(cmd)
+    =}
+
+    // @label handle_wp_in
+    reaction (wp_in_start, wp_in_end) {=
+        if wp_in_start.is_present:
+            wp = wp_in_start.value  
+            self._conveyor_shape.set_init_coordinates(wp.shape)
+        else:
+            assert wp_in_end.is_present
+            wp = wp_in_end.value  
+            self._conveyor_shape.set_init_coordinates(wp.shape, in_direction="exit")
+
+        assert isinstance(wp, Material)
+        self.insert_wp(wp)
+        self.logger.debug(f"Inserted WP {wp} at position {wp.shape.centroid_pos}")
+    =}
+
+    // @label update_wps_position
+    reaction (tick) -> wp_out_end, wp_out_start, trigger_ps_action {=
+        if not self._is_on or self.speed == 0:
+            return 0
+
+        dx = self._cos_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS))
+        dy = self._sin_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS))
+        guards = self._guards
+
+        if self.speed > 0:
+            wps = iter(self._wps)
+            wp_out = wp_out_end
+            wp_angle = self._conveyor_shape.angle
+        else:
+            wps = reversed(self._wps)
+            wp_out = wp_out_start
+            wp_angle = (self._conveyor_shape.angle + np.pi) % (2 * np.pi)
+
+        for i, wp in enumerate(wps):
+
+            # Update WP position
+            shape = wp.shape
+            shape.translate(dx, dy)
+            self.logger.debug(f"Moved WP {wp} to position {shape.centroid_pos}")
+            
+            for guard in guards: 
+                if not guard.is_active(wp):
+                    continue
+                self.logger.debug(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
+                shape.collision(guard.guard_area, wp_angle)
+                end_position = wp.shape.centroid_pos
+                self.logger.debug(f"New center at {end_position}")
+
+            # Check for collision with other WPs
+            if i > 0 and wp != self._wps[i-1] and shape.intersects(self._wps[i-1].shape):
+                shape.collision(self._wps[i-1].shape, wp_angle)
+                end_position = wp.shape.centroid_pos
+                self.logger.warning(f"Detected collision of WP {wp} with wp {self._wps[i-1]}, new center at {end_position}")
+
+            if i == 0 and not self._conveyor_shape.contains(shape):
+                # remove WP
+                self.remove_wp(wp, wp_out) 
+                self.logger.debug(f"WP {wp} exited conveyor at position {shape.centroid_pos}")
+
+        # Check position sensor triggers
+        for sensor, triggering_cmd, target_action, delay in self._ps_triggers:
+            cmds = [cmd for cmd in self._active_cmds.values() if cmd.cmd_type == triggering_cmd]
+
+            wp = [cmd.wp for cmd in cmds if sensor.is_detected(cmd.wp)]
+            assert len(wp) <= 1, "More than one WP detected by position sensor"
+
+            if len(wp) != 0:
+                self.logger.info(f"Position sensor {sensor.name} detected WP {wp[0]} for command {triggering_cmd}, scheduling action.")
+                trigger_ps_action.schedule(delay, (target_action, wp[0]))
+    =}
+}

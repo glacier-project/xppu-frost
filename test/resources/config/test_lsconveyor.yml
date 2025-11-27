@@ -1,0 +1,8 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  lsc:
+    logging_level: DEBUG
+    parameters:
+      _speed: 0.185 # m/s
+      _is_on: true

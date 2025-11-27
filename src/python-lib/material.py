@@ -3,7 +3,7 @@ from enum import Enum
 from shape import Shape, CircleShape
 from shapely import Point
 
-@dataclass
+@dataclass(frozen=True)
 class Position:
     x: float = 0
     y: float = 0
@@ -34,6 +34,19 @@ class Material:
         self.cap = cap
         self.stamped = stamped
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Material):
+            return False
+        return (self.id == other.id and
+                self.m_type == other.m_type and
+                self.weight == other.weight and
+                self.cap == other.cap and
+                self.stamped == other.stamped and
+                self.shape == other.shape)
+    
+    def __hash__(self) -> int:
+        return hash((self.id, self.m_type, self.weight, self.cap, self.stamped, self.shape))
+
     def __str__(self) -> str:
         return f'Material(id={self.id}, m_type={self.m_type}, weight={self.weight}, cap={self.cap}, stamped={self.stamped}, shape={self.shape})'
 
@@ -41,7 +54,6 @@ class Material:
         return f'Material(id={self.id}, m_type={self.m_type}, weight={self.weight}, cap={self.cap}, stamped={self.stamped}, shape={self.shape})'
 
 
-@dataclass
 class SteelMaterial(Material):
 
     def __init__(
@@ -52,7 +64,6 @@ class SteelMaterial(Material):
             ):
         super().__init__(id=id,m_type=MaterialType.STEEL,weight=weight,shape=shape)
         
-@dataclass
 class PlasticMaterial(Material):
 
     def __init__(
