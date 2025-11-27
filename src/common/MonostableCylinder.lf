@@ -72,8 +72,13 @@ reactor MonostableCylinder(
         s.set(self.mc_state)
     =}
 
-    # Calculates the time required to transition to the target state based on the current state and elapsed time during movement.
     method get_transition_time_to(mc_state){=
+        """
+        Calculate the time required to transition to the target state `mc_state` based on the current state and elapsed time during movement.
+        
+        Args:
+            mc_state (MonostableCylinderState): The target state to transition to.
+        """
         current_transition = self.current_transition
         current_state = self.mc_state
         
