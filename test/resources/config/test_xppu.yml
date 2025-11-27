@@ -1,0 +1,11 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  xppu:
+    logging_level: DEBUG
+    parameters:
+      data_model_path: "resources/data_model/xppu.yml"
+  bus:
+    logging_level: DEBUG
+    parameters:
+      data_model_path: "resources/data_model/bus.yml"

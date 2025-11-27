@@ -1,0 +1,12 @@
+target Python;
+
+import FrostMachine from "../../frost/src/lib/FrostMachine.lf"
+import Stack from "stack/Stack.lf"
+import Crane from "crane/Crane.lf"
+import LSConveyor from "conveyor/LSConveyor.lf"
+
+reactor XPPU extends FrostMachine{
+    lsc = new LSConveyor(name={= self.name + ".lsc" =})
+    stack = new Stack(name={= self.name + ".stack" =})
+    crane = new Crane(name={= self.name + ".crane" =})
+}

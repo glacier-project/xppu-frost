@@ -1,0 +1,29 @@
+target Python{
+    fast: true,
+    timeout: 180 s,
+}
+
+import XPPU from "../../src/XPPU.lf"
+import FrostBus from "../../frost/src/lib/FrostBus.lf"
+
+preamble{=
+import uuid
+from frost import *
+
+logger = logging.getLogger("test_xppu")
+logger.setLevel(logging.DEBUG)
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
+=}
+
+main reactor {
+    xppu = new XPPU(name="xppu")
+    bus = new FrostBus(name="bus")
+
+    xppu.channel_out -> bus.channel_in
+    bus.channel_out -> xppu.channel_in after 0
+}
