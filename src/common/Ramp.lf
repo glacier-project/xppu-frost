@@ -1,0 +1,13 @@
+target Python
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf"
+
+reactor Ramp extends FrostBase{
+    input wp_in
+
+    # @label WP received
+    reaction (wp_in) {=
+        wp = wp_in.value
+        self.logger.info(f"Received WP: {wp}")
+    =}
+}
