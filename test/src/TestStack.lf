@@ -22,7 +22,7 @@ stack_wps = [
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
-logger(f"Initialized stack WPs: {stack_wps}")
+logger.debug(f"Initialized stack WPs: {stack_wps}")
 =}
 
 main reactor {
