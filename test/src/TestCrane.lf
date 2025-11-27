@@ -21,6 +21,12 @@ from shape import Point
 
 logger = logging.getLogger("test_crane")
 logger.setLevel(logging.DEBUG)
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
 =}
 
 main reactor {

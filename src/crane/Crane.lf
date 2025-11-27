@@ -13,17 +13,11 @@ preamble{=
 import numpy as np
 from crane_utils import CraneCmd, CranePos
 from material import Material
-crane_dpos={
-    CranePos.POS_S:np.pi,
-    CranePos.POS_LSC:(3/2)*np.pi,
-    CranePos.POS_ST:0,
-    CranePos.POS_ST:2*np.pi
-}
 =}
 
 reactor Crane(
-    ref_x = 0, # m
-    ref_y = 0, # m
+    ref_x = 0.2275, # m
+    ref_y = 0.8275, # m
     length = 0.105 # m
 ) extends FrostBase{
 
@@ -56,30 +50,35 @@ reactor Crane(
     )
     r_base = new RBase(
         name={= self.name + ".r_base" =}, 
-        dpos_dict={=crane_dpos=}, 
         tick_interval=1 ms,
         ang_speed=0.698132 # rad/s
     )
     r_base.d_pos -> position
 
     method set_wp_in(wp, wp_area){=
+        """
+        Sets the workpiece in the specified area.
+        
+        Args:
+            wp (Material): The workpiece to set.
+            wp_area (str): The area to set the workpiece in. Must be one of "stack", "stamp", or "lsc".
+        """
         if not isinstance(wp, Material):
             raise ValueError(f"Input wp must be of type Material, got {type(material)} in {wp_area} wp_area.")
         setattr(self, f"_wp_in_{wp_area}", wp)
     =}
 
-    reaction (wp_in_stack){=
-        self.set_wp_in(wp_in_stack.value, "stack")
+    // @label handle_wp_in 
+    reaction (wp_in_stack, wp_in_stamp, wp_in_lsc){=
+        if wp_in_stack.is_present:
+            self.set_wp_in(wp_in_stack.value, "stack")
+        if wp_in_stamp.is_present:
+            self.set_wp_in(wp_in_stamp.value, "stamp")
+        if wp_in_lsc.is_present:
+            self.set_wp_in(wp_in_lsc.value, "lsc")
     =}
 
-    reaction (wp_in_stamp){=
-        self.set_wp_in(wp_in_stamp.value, "stamp")
-    =}
-
-    reaction (wp_in_lsc){=
-        self.set_wp_in(wp_in_lsc.value, "lsc")
-    =}
-
+    // @label handle_cmd
     reaction (cmd) -> r_base.cmd, mc.cmd{=
         cmd = cmd.value
 
@@ -104,10 +103,12 @@ reactor Crane(
             raise UnsupportedCmd(f"Received unknown crane command: {cmd}")
     =}
 
+    // @label update_discrete_position
     reaction (r_base.d_pos) {=
         self._current_postion = r_base.d_pos.value
     =}
 
+    // @label update_base_angle
     reaction (r_base.angle) {=
         current_angle = r_base.angle.value
         if self._wp is not None:
@@ -119,6 +120,7 @@ reactor Crane(
         self._current_angle = current_angle        
     =}
 
+    // @label handle_mc_state_change
     reaction (mc.s) -> current_wp, wp_out_stack, wp_out_stamp, wp_out_lsc, mc.cmd{=
         mc_state = mc.s.value
         self.logger.debug(f"Crane MC state changed to {mc_state.name}")

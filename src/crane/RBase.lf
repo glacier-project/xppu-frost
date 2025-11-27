@@ -20,6 +20,16 @@ reactor MDriver (dpos_dict={=dict()=}, accuracy=0.001) extends FrostBase{
     state current_angle
 
     method compute_direction(angle, d_angle){=
+        """
+        Compute the motor command direction (CW, CCW, IDLE) to reach the desired
+        angle (d_angle) from the current angle.
+        
+        Args:
+            angle (float): Current angle in radians.
+            d_angle (float): Desired angle in radians.
+        Returns:
+            MotorCMD: The computed motor command direction.
+        """
         self.logger.debug(f"Compute direction received angle={angle} and d_angle={d_angle}")
 
         # no cmd, position reached 
@@ -84,6 +94,7 @@ reactor Motor (
         angle.set(self.current_angle)
     =}
 
+    // @label motor_tick
     reaction(tick) -> angle{=
         cmd = self.current_cmd
         
@@ -109,6 +120,7 @@ reactor Motor (
         # self._logger.info(f"New angle = {n_angle}")
     =}
 
+    // @label set_motor_command
     reaction(m_cmd){=
         if self.current_cmd == m_cmd.value:
             return 0
@@ -120,7 +132,7 @@ reactor Motor (
 
 reactor RBase (
     tick_interval=1 ms, 
-    dpos_dict={=dict()=}, 
+    dpos_dict={=crane_dpos=}, 
     ang_speed=1
 ) extends FrostBase{
     input cmd
