@@ -6,7 +6,76 @@ import Crane from "crane/Crane.lf"
 import LSConveyor from "conveyor/LSConveyor.lf"
 
 reactor XPPU extends FrostMachine{
-    lsc = new LSConveyor(name={= self.name + ".lsc" =})
+
+    # Data model variables 
+    state stack_wp_available 
+    state stack_product_type 
+    state stack_mc_extended
+    state stack_mc_retracted
+
+    state crane_at_stack
+    state crane_at_stamp
+    state crane_at_lsc
+    state crane_holding_wp
+    state crane_mc_extended
+    state crane_mc_retracted
+    state crane_angle
+    state crane_product_type
+
+    // state lsc_wp_at_entry
+    state lsc_wp_at_ramp_start
+    state lsc_wp_at_ramp_mid
+    state lsc_wp_at_ramp_end
+    # state lsc_wp_at_inductive_sensor_end
+    state lsc_wp_product_type
+    state lsc_mc_ramp_start_retracted
+    state lsc_mc_ramp_start_extended
+    state lsc_mc_ramp_mid_retracted
+    state lsc_mc_ramp_mid_extended
+    state lsc_mc_ramp_end_retracted
+    state lsc_mc_ramp_end_extended
+    state lsc_ramp_start_wp_count
+    state lsc_ramp_mid_wp_count
+    state lsc_ramp_end_wp_count
+
+
     stack = new Stack(name={= self.name + ".stack" =})
     crane = new Crane(name={= self.name + ".crane" =})
+    lsc = new LSConveyor(name={= self.name + ".lsc" =})
+
+    stack.wp_at_pickup -> crane.wp_in_stack
+    crane.wp_out_lsc -> lsc.wp_in_start
+
+    reaction (startup){=
+        # Stack data model nodes 
+        self.stack_wp_available = self.data_model.get_node("xPPU/Stack/Variables/WpAvailable")
+        self.stack_product_type = self.data_model.get_node("xPPU/Stack/Variables/ProductType")
+        self.stack_mc_extended = self.data_model.get_node("xPPU/Stack/Variables/McExtended")
+        self.stack_mc_retracted = self.data_model.get_node("xPPU/Stack/Variables/McRetracted")
+
+        # Crane data model nodes
+        self.crane_at_stack = self.data_model.get_node("xPPU/Crane/Variables/AtStack")
+        self.crane_at_stamp = self.data_model.get_node("xPPU/Crane/Variables/AtStamp")
+        self.crane_at_lsc = self.data_model.get_node("xPPU/Crane/Variables/AtLsc")
+        self.crane_holding_wp = self.data_model.get_node("xPPU/Crane/Variables/HoldingWp")
+        self.crane_product_type = self.data_model.get_node("xPPU/Crane/Variables/ProductType")
+        self.crane_mc_extended = self.data_model.get_node("xPPU/Crane/Variables/McExtended")
+        self.crane_mc_retracted = self.data_model.get_node("xPPU/Crane/Variables/McRetracted")
+        self.crane_angle = self.data_model.get_node("xPPU/Crane/Variables/Angle")
+
+        # LSC data model nodes
+        self.lsc_wp_at_ramp_start = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampStart")
+        self.lsc_wp_at_ramp_mid = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampMid")
+        self.lsc_wp_at_ramp_end = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampEnd")
+        self.lsc_wp_product_type = self.data_model.get_node("xPPU/LSC/Variables/ProductType")
+        self.lsc_mc_ramp_start_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampStartRetracted")
+        self.lsc_mc_ramp_start_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampStartExtended")
+        self.lsc_mc_ramp_mid_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampMidRetracted")
+        self.lsc_mc_ramp_mid_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampMidExtended")
+        self.lsc_mc_ramp_end_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampEndRetracted")
+        self.lsc_mc_ramp_end_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampEndExtended")
+        self.lsc_ramp_start_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampStartWpCount")
+        self.lsc_ramp_mid_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampMidWpCount")
+        self.lsc_ramp_end_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampEndWpCount")
+    =}
 }
