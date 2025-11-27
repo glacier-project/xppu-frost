@@ -16,7 +16,7 @@ preamble{=
 from frost import *
 import numpy as np
 from f_compare import cos, sin
-from shape import ConveyorBeltShape, Point
+from shape import ConveyorBeltShape, Point, ComponentShape
 from material import Material
 from position_sensor import PositionSensor
 from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
