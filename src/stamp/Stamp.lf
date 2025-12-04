@@ -1,0 +1,126 @@
+target Python{
+    files: [
+        "../python-lib/material.py",
+        "../python-lib/shape.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape_utils.py",
+        "../python-lib/stamp.py",
+    ],
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+preamble{=
+    from stamp import StampCmd
+=}
+
+reactor Stamp(
+    ref_x = 0, # m
+    ref_y = 0, # m
+    c_angle = 0, # radians
+    stamp_light_p_delay = 2, # s
+    stamp_medium_p_delay = 2.2, # s
+    stamp_heavy_p_delay = 2.4 # s
+) extends FrostBase{
+    preamble{=
+        LEGNTH=0.24
+        WIDTH=0.055
+        PU_OFFSET=0
+        PU_LENGTH=0.055
+        PU_WIDTH=0.055
+        STAMP_OFFSET=0.185
+        STAMP_LENGTH=0.055
+        STAMP_WIDTH=0.055
+    =}
+
+    input cmd
+    input wp_in
+    output wp_out
+    output mc_state
+    output bc_state
+
+    logical action end_stamp
+    state _current_cmd
+    state _wp
+
+    state _c_shape = {=ComponentShape(centroid_pos=Point(self.ref_x+self.LEGNTH/2, self.ref_y+self.WIDTH/2, 0), base=self.LEGNTH, height=self.WIDTH, angle=self.c_angle)=}
+    state _stamp_area = {= self._c_shape.get_sensor_shape(self.STAMP_OFFSET, self.STAMP_WIDTH, self.STAMP_LENGTH) =}
+    state _pu_area = {= self._c_shape.get_sensor_shape(self.PU_OFFSET, self.PU_WIDTH, self.PU_LENGTH) =}
+    state _stamp_delay = 2 # s
+
+    mc = new MonostableCylinder(
+        name={= self.name + ".mc" =},     
+        retraction_speed=223.684, # m/s t= 0.38ms TODO check
+        extension_speed=472.222, # m/s t= 0.18ms TODO check
+        extension_length=0.13, # m
+        is_retracted=False
+    )
+    mc.s -> mc_state;
+
+    bc = new MonostableCylinder(
+        name={= self.name + ".bc" =},     
+        retraction_speed=223.684, # m/s t= 0.38ms TODO check
+        extension_speed=472.222, # m/s t= 0.18ms TODO check
+        extension_length=0.055 # m    
+    )
+    bc.s -> bc_state;
+
+    method get_stamp_time() {=
+        current_cmd = self._current_cmd
+        cmd_delay = 0
+        if current_cmd == StampCmd.STAMP_LIGHT_P:
+            cmd_delay = self.stamp_light_p_delay
+        elif current_cmd == StampCmd.STAMP_MEDIUM_P:
+            cmd_delay = self.stamp_medium_p_delay
+        elif current_cmd == StampCmd.STAMP_HEAVY_P:
+            cmd_delay = self.stamp_heavy_p_delay
+        else:
+            raise ValueError(f"Unknown stamping command: {current_cmd}")
+        
+        return round(cmd_delay * SECS(1))
+    =}
+
+    reaction (cmd) -> mc.cmd{=
+        assert self._wp is not None, "No workpiece to stamp"
+        self._current_cmd = cmd.value
+        self.logger.info(f"Starting stamping workpiece {self._wp} at stamp with command {self._current_cmd}, retracting mc and extending bc")
+         
+        # end_stamp.schedule(self.stamp_medium_p_delay * SECS(1))
+        mc.cmd.set(MonostableCylinderCmd.RETRACT)
+    =}
+
+    reaction (mc.s, bc.s) -> mc.cmd, bc.cmd, end_stamp, wp_out{=
+        if not self._current_cmd:
+            return 0
+
+        if mc.s.is_present:
+            if mc.s.value == MonostableCylinderState.RETRACTED:
+                self.logger.info(f"MC retracted, extending BC to stamp workpiece {self._wp}")
+                bc.cmd.set(MonostableCylinderCmd.EXTEND)
+            if mc.s.value == MonostableCylinderState.EXTENDED:
+                self.logger.info(f"MC extended after stamping for workpiece {self._wp}")
+                self._current_cmd = None
+                wp_out.set(self._wp) 
+
+        if bc.s.is_present:
+            if bc.s.value == MonostableCylinderState.EXTENDED:
+                self.logger.info(f"BC extended, scheduling end_stamp for workpiece {self._wp} after delay {self.stamp_medium_p_delay} s")
+                end_stamp.schedule(self.get_stamp_time())
+            if bc.s.value == MonostableCylinderState.RETRACTED:
+                self.logger.info(f"BC retracted, stamping process completed for workpiece {self._wp}. Extending MC.")
+                mc.cmd.set(MonostableCylinderCmd.EXTEND)
+    =}
+
+    reaction (end_stamp) -> bc.cmd{=
+        self.logger.info(f"Ending stamping for workpiece {self._wp}, retracting BC")
+        bc.cmd.set(MonostableCylinderCmd.RETRACT)
+    =}
+
+    reaction (wp_in) {=
+        self._wp = wp_in.value
+        self.logger.info(f"Received workpiece {self._wp} at stamp with stamp area {self._stamp_area} and pu area {self._pu_area}")
+        set_wp_coordinates_to(self._wp, self._pu_area)
+    =}
+}
