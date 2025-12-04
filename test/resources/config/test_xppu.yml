@@ -12,4 +12,4 @@ reactors:
   xppu_tester:
     logging_level: INFO
     parameters:
-      data_model_path: ../resources/data_model/xppu_tester.yml
+      data_model_path: resources/data_model/xppu_tester.yml
