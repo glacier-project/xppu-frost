@@ -8,7 +8,6 @@ import FrostBase from "../../frost/src/lib/FrostBase.lf";
 preamble{=
 import uuid
 from frost import *
-from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
 logger = logging.getLogger("test_monostable_cylinder")
 logger.setLevel(logging.DEBUG)
 =}
@@ -20,7 +19,7 @@ main reactor extends FrostBase {
 
     # MC with 0.2 m/s speed and 0.01 m extension -> 0.05s = 50ms per full movement
     mc = new MonostableCylinder(
-        name="monostable_cylinder", 
+        name="monostable_cylinder",
         retraction_speed=0.2,      # m/s
         extension_speed=0.2,       # m/s
         extension_length=0.01,     # m (10mm)
@@ -35,7 +34,7 @@ main reactor extends FrostBase {
         self.retraction_time = MSECS(50)
         self.logger.info(f"Expected extension time: {self.extension_time} ns ({self.extension_time/MSECS(1)} ms)")
         self.logger.info(f"Expected retraction time: {self.retraction_time} ns ({self.retraction_time/MSECS(1)} ms)")
-            
+
         # Test sequence:
         # Phase 0 [0 ms]: Initial RETRACTED state
         # Phase 1 [0 ms]: Start extension -> EXTENDING
@@ -45,7 +44,7 @@ main reactor extends FrostBase {
         # Phase 5 [75 ms]: At 75ms interrupt with RETRACT (20% extended = 10ms in) -> RETRACTING
         # Phase 6 [80 ms]: At 80ms interrupt with EXTEND (5ms into retraction, reverses) -> EXTENDING
         # Phase 7 [125 ms]: EXTENDED after ~45ms (from ~10% position to 100%)
-        
+
         send_cmd.schedule(MSECS(0), (MonostableCylinderCmd.EXTEND, "start_extension"))
         send_cmd.schedule(MSECS(25), (MonostableCylinderCmd.RETRACT, "interrupt_ext_50%"))
         send_cmd.schedule(MSECS(65), (MonostableCylinderCmd.EXTEND, "start_extension_again"))

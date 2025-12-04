@@ -7,7 +7,6 @@ import MonostableCylinder from "../../src/common/MonostableCylinder.lf"
 preamble{=
 import uuid
 from frost import *
-from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
 logger = logging.getLogger("test_monostable_cylinder")
 logger.setLevel(logging.DEBUG)
 =}
