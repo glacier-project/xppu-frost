@@ -10,7 +10,6 @@ preamble{=
     import numpy as np
     from frost import *
     from copy import deepcopy
-    from crane_utils import CranePos,CraneCmd
 =}
 
 preamble{=
@@ -31,10 +30,10 @@ main reactor {
 
     state expected_positions = []
     logical action send_cmd
-    
+
     r_base = new RBase(
-        name="r_base", 
-        dpos_dict={=crane_dpos=}, 
+        name="r_base",
+        dpos_dict={=crane_dpos=},
         tick_interval=1 ms,
         ang_speed=0.698132 # rad/s
     )
@@ -49,7 +48,7 @@ main reactor {
             (CranePos.POS_S, MSECS(18000))    # Rotate to S in ~4.5s
         ]
 
-        cmd_time = 0 
+        cmd_time = 0
         for pos, end_time in self.expected_positions:
             logger.debug(f"Scheduling r_base_cmd at {cmd_time} ns to position {pos}")
             # small delay to ensure the command is processed after the previous position is reached
