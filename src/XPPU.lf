@@ -1,15 +1,103 @@
 target Python;
 
-import FrostMachine from "../../frost/src/lib/FrostMachine.lf"
+import FrostMachine from "../frost/src/lib/FrostMachine.lf"
 import Stack from "stack/Stack.lf"
 import Crane from "crane/Crane.lf"
+import Stamp from "stamp/Stamp.lf"
 import LSConveyor from "conveyor/LSConveyor.lf"
 
-reactor XPPU extends FrostMachine{
+preamble{=
 
-    # Data model variables 
-    state stack_wp_available 
-    state stack_product_type 
+# Method names
+STACK_REQUEST_WP_METHOD_NODE = "xPPU/Stack/Methods/RequestWp"
+ROTATE_CRANE_METHOD_NODE = "xPPU/Crane/Methods/RotateCrane"
+CRANE_PICKUP_WP_METHOD_NODE = "xPPU/Crane/Methods/PickupWp"
+CRANE_PUTDOWN_WP_METHOD_NODE = "xPPU/Crane/Methods/PutdownWp"
+STAMP_STAMP_METHOD_NODE = "xPPU/Stamp/Methods/Stamp"
+LSC_SET_WP_DESTINATION_METHOD_NODE = "xPPU/LSC/Methods/SetWPDestination"
+
+# Variable nodes paths in the XPPU data model
+STACK_WP_AVAILABLE_NODE = "xPPU/Stack/Variables/WpAvailable"
+STACK_PRODUCT_TYPE_NODE = "xPPU/Stack/Variables/ProductType"
+STACK_MC_EXTENDED_NODE = "xPPU/Stack/Variables/McExtended"
+STACK_MC_RETRACTED_NODE = "xPPU/Stack/Variables/McRetracted"
+CRANE_AT_STACK_NODE = "xPPU/Crane/Variables/AtStack"
+CRANE_AT_STAMP_NODE = "xPPU/Crane/Variables/AtStamp"
+CRANE_AT_LSC_NODE = "xPPU/Crane/Variables/AtLsc"
+CRANE_HOLDING_WP_NODE = "xPPU/Crane/Variables/HoldingWp"
+CRANE_MC_EXTENDED_NODE = "xPPU/Crane/Variables/McExtended"
+CRANE_MC_RETRACTED_NODE = "xPPU/Crane/Variables/McRetracted"
+CRANE_ANGLE_NODE = "xPPU/Crane/Variables/Angle"
+CRANE_PRODUCT_TYPE_NODE = "xPPU/Crane/Variables/ProductType"
+STAMP_WORKPIECE_STATE_NODE = "xPPU/Stamp/Variables/WorkpieceState"
+STAMP_WP_AT_STAMP_NODE = "xPPU/Stamp/Variables/WpAtStamp"
+STAMP_WP_PRODUCT_TYPE_NODE = "xPPU/Stamp/Variables/ProductType"
+STAMP_MC_RETRACTED_NODE = "xPPU/Stamp/Variables/McRetracted"
+STAMP_MC_EXTENDED_NODE = "xPPU/Stamp/Variables/McExtended"
+STAMP_BC_RETRACTED_NODE = "xPPU/Stamp/Variables/BcRetracted"
+STAMP_BC_EXTENDED_NODE = "xPPU/Stamp/Variables/BcExtended"
+LSC_WP_AT_RAMP_START_NODE = "xPPU/LSC/Variables/WpAtRampStart"
+LSC_WP_AT_RAMP_MID_NODE = "xPPU/LSC/Variables/WpAtRampMid"
+LSC_WP_AT_RAMP_END_NODE = "xPPU/LSC/Variables/WpAtRampEnd"
+LSC_WP_PRODUCT_TYPE_NODE = "xPPU/LSC/Variables/ProductType"
+LSC_MC_RAMP_START_RETRACTED_NODE = "xPPU/LSC/Variables/McRampStartRetracted"
+LSC_MC_RAMP_START_EXTENDED_NODE = "xPPU/LSC/Variables/McRampStartExtended"
+LSC_MC_RAMP_MID_RETRACTED_NODE = "xPPU/LSC/Variables/McRampMidRetracted"
+LSC_MC_RAMP_MID_EXTENDED_NODE = "xPPU/LSC/Variables/McRampMidExtended"
+LSC_MC_PAC_RETRACTED_NODE = "xPPU/LSC/Variables/McPACRetracted"
+LSC_MC_PAC_EXTENDED_NODE = "xPPU/LSC/Variables/McPACExtended"
+LSC_RAMP_START_WP_COUNT_NODE = "xPPU/LSC/Variables/RampStartWpCount"
+LSC_RAMP_MID_WP_COUNT_NODE = "xPPU/LSC/Variables/RampMidWpCount"
+LSC_RAMP_END_WP_COUNT_NODE = "xPPU/LSC/Variables/RampEndWpCount"
+
+XPPU_DATA_MODEL_NODES = [
+    STACK_WP_AVAILABLE_NODE,
+    STACK_PRODUCT_TYPE_NODE,
+    STACK_MC_EXTENDED_NODE,
+    STACK_MC_RETRACTED_NODE,
+    CRANE_AT_STACK_NODE,
+    CRANE_AT_STAMP_NODE,
+    CRANE_AT_LSC_NODE,
+    CRANE_HOLDING_WP_NODE,
+    CRANE_MC_EXTENDED_NODE,
+    CRANE_MC_RETRACTED_NODE,
+    CRANE_ANGLE_NODE,
+    CRANE_PRODUCT_TYPE_NODE,
+    STAMP_WORKPIECE_STATE_NODE,
+    STAMP_WP_AT_STAMP_NODE,
+    STAMP_WP_PRODUCT_TYPE_NODE,
+    STAMP_MC_RETRACTED_NODE,
+    STAMP_MC_EXTENDED_NODE,
+    STAMP_BC_RETRACTED_NODE,
+    STAMP_BC_EXTENDED_NODE,
+    LSC_WP_AT_RAMP_START_NODE,
+    LSC_WP_AT_RAMP_MID_NODE,
+    LSC_WP_AT_RAMP_END_NODE,
+    LSC_WP_PRODUCT_TYPE_NODE,
+    LSC_MC_RAMP_START_RETRACTED_NODE,
+    LSC_MC_RAMP_START_EXTENDED_NODE,
+    LSC_MC_RAMP_MID_RETRACTED_NODE,
+    LSC_MC_RAMP_MID_EXTENDED_NODE,
+    LSC_MC_PAC_RETRACTED_NODE,
+    LSC_MC_PAC_EXTENDED_NODE,
+    LSC_RAMP_START_WP_COUNT_NODE,
+    LSC_RAMP_MID_WP_COUNT_NODE,
+    LSC_RAMP_END_WP_COUNT_NODE
+]
+=}
+
+reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
+
+    # Cmds variables
+    state stack_cmd
+    state crane_cmd
+    state lsc_cmd
+    state stamp_cmd
+    state lsc_wp
+
+    # Data model variables
+    state stack_wp_available
+    state stack_product_type
     state stack_mc_extended
     state stack_mc_retracted
 
@@ -21,6 +109,14 @@ reactor XPPU extends FrostMachine{
     state crane_mc_retracted
     state crane_angle
     state crane_product_type
+
+    state stamp_workpiece_state
+    state stamp_wp_at_stamp
+    state stamp_product_type
+    state stamp_mc_extended
+    state stamp_mc_retracted
+    state stamp_bc_extended
+    state stamp_bc_retracted
 
     // state lsc_wp_at_entry
     state lsc_wp_at_ramp_start
@@ -38,44 +134,270 @@ reactor XPPU extends FrostMachine{
     state lsc_ramp_mid_wp_count
     state lsc_ramp_end_wp_count
 
-
-    stack = new Stack(name={= self.name + ".stack" =})
+    stack = new Stack(name={= self.name + ".stack" =}, buffer= {= self.stack_buffer =})
+    output is_stack_empty
+    stack.is_empty -> is_stack_empty;
+    output stack_wp_at_pickup
+    stack.wp_at_pickup -> stack_wp_at_pickup;
     crane = new Crane(name={= self.name + ".crane" =})
+    stamp = new Stamp(name={= self.name + ".stamp" =})
     lsc = new LSConveyor(name={= self.name + ".lsc" =})
 
     stack.wp_at_pickup -> crane.wp_in_stack
     crane.wp_out_lsc -> lsc.wp_in_start
+    crane.wp_out_stamp -> stamp.wp_in
+    stamp.wp_out -> crane.wp_in_stamp
 
     reaction (startup){=
-        # Stack data model nodes 
-        self.stack_wp_available = self.data_model.get_node("xPPU/Stack/Variables/WpAvailable")
-        self.stack_product_type = self.data_model.get_node("xPPU/Stack/Variables/ProductType")
-        self.stack_mc_extended = self.data_model.get_node("xPPU/Stack/Variables/McExtended")
-        self.stack_mc_retracted = self.data_model.get_node("xPPU/Stack/Variables/McRetracted")
+        # Method callback registrations
+        self.data_model.get_node(STACK_REQUEST_WP_METHOD_NODE).callback = self.req_stack_wp
+        self.data_model.get_node(ROTATE_CRANE_METHOD_NODE).callback = lambda Position: self.execute_crane_cmd(Position)
+        self.data_model.get_node(CRANE_PICKUP_WP_METHOD_NODE).callback = lambda: self.execute_crane_cmd(CraneCmd.PICKUP_WP)
+        self.data_model.get_node(CRANE_PUTDOWN_WP_METHOD_NODE).callback = lambda: self.execute_crane_cmd(CraneCmd.PUTDOWN_WP)
+        self.data_model.get_node(STAMP_STAMP_METHOD_NODE).callback = self.execute_stamp_cmd
+        self.data_model.get_node(LSC_SET_WP_DESTINATION_METHOD_NODE).callback = self.execute_lsc_cmd
+        
+        # Stack data model nodes
+        self.stack_wp_available = self.data_model.get_node(STACK_WP_AVAILABLE_NODE)
+        self.stack_product_type = self.data_model.get_node(STACK_PRODUCT_TYPE_NODE)
+        self.stack_mc_extended = self.data_model.get_node(STACK_MC_EXTENDED_NODE)
+        self.stack_mc_retracted = self.data_model.get_node(STACK_MC_RETRACTED_NODE)
 
         # Crane data model nodes
-        self.crane_at_stack = self.data_model.get_node("xPPU/Crane/Variables/AtStack")
-        self.crane_at_stamp = self.data_model.get_node("xPPU/Crane/Variables/AtStamp")
-        self.crane_at_lsc = self.data_model.get_node("xPPU/Crane/Variables/AtLsc")
-        self.crane_holding_wp = self.data_model.get_node("xPPU/Crane/Variables/HoldingWp")
-        self.crane_product_type = self.data_model.get_node("xPPU/Crane/Variables/ProductType")
-        self.crane_mc_extended = self.data_model.get_node("xPPU/Crane/Variables/McExtended")
-        self.crane_mc_retracted = self.data_model.get_node("xPPU/Crane/Variables/McRetracted")
-        self.crane_angle = self.data_model.get_node("xPPU/Crane/Variables/Angle")
+        self.crane_at_stack = self.data_model.get_node(CRANE_AT_STACK_NODE)
+        self.crane_at_stamp = self.data_model.get_node(CRANE_AT_STAMP_NODE)
+        self.crane_at_lsc = self.data_model.get_node(CRANE_AT_LSC_NODE)
+        self.crane_holding_wp = self.data_model.get_node(CRANE_HOLDING_WP_NODE)
+        self.crane_product_type = self.data_model.get_node(CRANE_PRODUCT_TYPE_NODE)
+        self.crane_mc_extended = self.data_model.get_node(CRANE_MC_EXTENDED_NODE)
+        self.crane_mc_retracted = self.data_model.get_node(CRANE_MC_RETRACTED_NODE)
+        self.crane_angle = self.data_model.get_node(CRANE_ANGLE_NODE)
+
+        # Stamp data model nodes
+        self.stamp_workpiece_state = self.data_model.get_node(STAMP_WORKPIECE_STATE_NODE)
+        self.stamp_wp_at_stamp = self.data_model.get_node(STAMP_WP_AT_STAMP_NODE)
+        self.stamp_product_type = self.data_model.get_node(STAMP_WP_PRODUCT_TYPE_NODE)
+        self.stamp_mc_retracted = self.data_model.get_node(STAMP_MC_RETRACTED_NODE)
+        self.stamp_mc_extended = self.data_model.get_node(STAMP_MC_EXTENDED_NODE)
+        self.stamp_bc_retracted = self.data_model.get_node(STAMP_BC_RETRACTED_NODE)
+        self.stamp_bc_extended = self.data_model.get_node(STAMP_BC_EXTENDED_NODE)
 
         # LSC data model nodes
-        self.lsc_wp_at_ramp_start = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampStart")
-        self.lsc_wp_at_ramp_mid = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampMid")
-        self.lsc_wp_at_ramp_end = self.data_model.get_node("xPPU/LSC/Variables/WpAtRampEnd")
-        self.lsc_wp_product_type = self.data_model.get_node("xPPU/LSC/Variables/ProductType")
-        self.lsc_mc_ramp_start_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampStartRetracted")
-        self.lsc_mc_ramp_start_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampStartExtended")
-        self.lsc_mc_ramp_mid_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampMidRetracted")
-        self.lsc_mc_ramp_mid_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampMidExtended")
-        self.lsc_mc_ramp_end_retracted = self.data_model.get_node("xPPU/LSC/Variables/McRampEndRetracted")
-        self.lsc_mc_ramp_end_extended = self.data_model.get_node("xPPU/LSC/Variables/McRampEndExtended")
-        self.lsc_ramp_start_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampStartWpCount")
-        self.lsc_ramp_mid_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampMidWpCount")
-        self.lsc_ramp_end_wp_count = self.data_model.get_node("xPPU/LSC/Variables/RampEndWpCount")
+        # self.lsc_wp_at_ramp_start = self.data_model.get_node(LSC_WP_AT_RAMP_START_NODE)
+        # self.lsc_wp_at_ramp_mid = self.data_model.get_node(LSC_WP_AT_RAMP_MID_NODE)
+        # self.lsc_wp_at_ramp_end = self.data_model.get_node(LSC_WP_AT_RAMP_END_NODE)
+        self.lsc_wp_product_type = self.data_model.get_node(LSC_WP_PRODUCT_TYPE_NODE)
+        self.lsc_mc_ramp_start_retracted = self.data_model.get_node(LSC_MC_RAMP_START_RETRACTED_NODE)
+        self.lsc_mc_ramp_start_extended = self.data_model.get_node(LSC_MC_RAMP_START_EXTENDED_NODE)
+        self.lsc_mc_ramp_mid_retracted = self.data_model.get_node(LSC_MC_RAMP_MID_RETRACTED_NODE)
+        self.lsc_mc_ramp_mid_extended = self.data_model.get_node(LSC_MC_RAMP_MID_EXTENDED_NODE)
+        self.lsc_mc_pac_retracted = self.data_model.get_node(LSC_MC_PAC_RETRACTED_NODE)
+        self.lsc_mc_pac_extended = self.data_model.get_node(LSC_MC_PAC_EXTENDED_NODE)
+        self.lsc_ramp_start_wp_count = self.data_model.get_node(LSC_RAMP_START_WP_COUNT_NODE)
+        self.lsc_ramp_mid_wp_count = self.data_model.get_node(LSC_RAMP_MID_WP_COUNT_NODE)
+        self.lsc_ramp_end_wp_count = self.data_model.get_node(LSC_RAMP_END_WP_COUNT_NODE)
+    =}
+
+    # @label forward_cmd_requests
+    reaction (check_update) -> stack.provide_wp, crane.cmd, stamp.cmd, lsc.cmd {=
+        if self.stack_cmd:
+            self.stack_cmd = False
+            self.logger.info("Requesting workpiece from Stack")
+            stack.provide_wp.set(True)
+        if self.crane_cmd:
+            cmd = self.crane_cmd
+            self.crane_cmd = None
+            self.logger.info(f"Sending Crane command: {cmd.name}")
+            crane.cmd.set(cmd)
+        if self.stamp_cmd:
+            cmd = self.stamp_cmd
+            self.stamp_cmd = None
+            self.logger.info(f"Sending Stamp command: {cmd.name}")
+            stamp.cmd.set(cmd)
+        if self.lsc_cmd:
+            cmd = self.lsc_cmd
+            self.lsc_cmd = None
+            self.logger.info(f"Sending LSC command: {cmd}")
+            lsc.cmd.set(cmd)
+    =}
+
+    method req_stack_wp(){=
+        """Handles RequestWp method calls from the data model.
+
+        Returns:
+            bool: True if the request is accepted, False if a request is already being processed.
+        """
+        self.logger.debug("Received RequestWp method call")
+        if self.stack_cmd:
+            return False # already processing a request
+
+        self.stack_cmd = True
+    =}
+
+    method execute_crane_cmd(cmd){=
+        """Helper method to execute a crane command.
+
+        Args:
+            cmd (str): The crane command to execute.
+        """
+        self.logger.debug(f"Received crane command: {cmd}")
+        if self.crane_cmd is not None:
+            return False # already processing a command
+        # Convert string to CraneCmd
+        cmd = CraneCmd[cmd]
+        self.crane_cmd = cmd
+        return True
+    =}
+
+    method execute_stamp_cmd(stamp_cmd){=
+        """Helper method to execute a stamp command.
+
+        Args:
+            PressureType (str): The stamp command to execute.
+        """
+        self.logger.debug(f"Received stamp command: {stamp_cmd}")
+        if self.stamp_cmd is not None:
+            return False # already processing a command
+        cmd = StampCmd[stamp_cmd]
+        self.stamp_cmd = cmd
+        return True
+    =}
+
+    method execute_lsc_cmd(Destination){=
+        """Helper method to execute an LSC command.
+
+        Args:
+            Destination (str): The destination to set for the workpiece.
+        """
+        self.logger.debug(f"Received LSC SetWPDestination command: {Destination}")
+        if self.lsc_cmd is not None:
+            return False # already processing a command
+        # Convert string to LSCCmdType
+        cmd_type = LSCCmdType[Destination]
+        assert self.lsc_wp is not None, "No workpiece available to set destination for LSC"
+        self.lsc_cmd = ConveyorCmd(wp=self.lsc_wp, cmd_type=cmd_type)
+        return True
+    =}
+
+    # Data model update reactions
+
+    # @label handle_stack_wp_pickup
+    reaction (stack.wp_at_pickup) {=
+        self.logger.debug(f"Stack provided workpiece {stack.wp_at_pickup.value}")
+        wp = stack.wp_at_pickup.value
+        self.stack_wp_available.value = True
+        # TODO: define product type mapping
+        self.stack_product_type.value = 1 # wp.material_type
+    =}
+
+    reaction (crane.position, crane.current_wp, crane.angle){=
+        if crane.position.is_present:
+            pos = crane.position.value
+            self.logger.debug(f"Updating crane position to {pos}")
+            self.crane_at_stack.value = (pos == CranePos.POS_S)
+            self.crane_at_stamp.value = (pos == CranePos.POS_ST)
+            self.crane_at_lsc.value = (pos == CranePos.POS_LSC)
+            self.logger.debug(f"Crane at stack: {self.crane_at_stack.value}, at stamp: {self.crane_at_stamp.value}, at lsc: {self.crane_at_lsc.value}")
+
+        if crane.current_wp.is_present:
+            wp = crane.current_wp.value
+            # Clear stack wp available when picked up
+            if self.crane_at_stack.value and wp is not None:
+                self.stack_wp_available.value = False
+                self.stack_product_type.value = 0
+            if self.crane_at_stamp.value and wp is not None:
+                self.stamp_wp_at_stamp.value = False
+                self.stamp_workpiece_state.value = 0 # No WP present
+                self.stamp_product_type.value = 0
+
+            self.crane_holding_wp.value = (wp is not None)
+            # TODO: define product type mapping
+            self.crane_product_type.value = 1 if wp is not None else 0 
+             
+        if crane.angle.is_present:
+            # self.logger.debug(f"Updating crane angle to {crane.angle.value}")
+            self.crane_angle.value = crane.angle.value
+    =}
+
+    method set_mc_state_variables(mc_state, mc_retracted, mc_extended){=
+        """Helper method to set MC state variables based on the current state.
+
+        Args:
+            mc_state (MonostableCylinderState): The current state of the MC.
+            mc_retracted (BooleanVariableNode): Data model node for MC retracted state.
+            mc_extended (BooleanVariableNode): Data model node for MC extended state.
+        """
+        if mc_state == MonostableCylinderState.RETRACTED:
+            mc_retracted.value = True
+            mc_extended.value = False
+        elif mc_state == MonostableCylinderState.EXTENDED:
+            mc_retracted.value = False
+            mc_extended.value = True
+        else:
+            mc_retracted.value = False
+            mc_extended.value = False
+    =}
+
+    # @label handle_mc_state_update
+    reaction (stack.mc_state, crane.mc_state, stamp.mc_state, stamp.bc_state, lsc.mc_ramp_start_state, lsc.mc_ramp_mid_state, lsc.mc_pac_state) {=
+        if stack.mc_state.is_present:
+            self.set_mc_state_variables(stack.mc_state.value, self.stack_mc_retracted, self.stack_mc_extended)
+        if crane.mc_state.is_present:
+            self.set_mc_state_variables(crane.mc_state.value, self.crane_mc_retracted, self.crane_mc_extended)
+        if stamp.mc_state.is_present:
+            self.set_mc_state_variables(stamp.mc_state.value, self.stamp_mc_retracted, self.stamp_mc_extended)
+        if stamp.bc_state.is_present:
+            self.set_mc_state_variables(stamp.bc_state.value, self.stamp_bc_retracted, self.stamp_bc_extended)
+        if lsc.mc_ramp_start_state.is_present:
+            self.set_mc_state_variables(lsc.mc_ramp_start_state.value, self.lsc_mc_ramp_start_retracted, self.lsc_mc_ramp_start_extended)
+        if lsc.mc_ramp_mid_state.is_present:
+            self.set_mc_state_variables(lsc.mc_ramp_mid_state.value, self.lsc_mc_ramp_mid_retracted, self.lsc_mc_ramp_mid_extended)
+        if lsc.mc_pac_state.is_present:
+            self.set_mc_state_variables(lsc.mc_pac_state.value, self.lsc_mc_pac_retracted, self.lsc_mc_pac_extended)
+    =}
+
+    reaction (crane.wp_out_lsc, crane.wp_out_stamp) {=
+        if crane.wp_out_lsc.is_present:
+            wp = crane.wp_out_lsc.value
+            self.logger.debug(f"Crane dropped off workpiece at LSC: {wp}")
+            self.lsc_wp = wp
+            self.lsc_wp_product_type.value = 1 # wp.material_type
+        if crane.wp_out_stamp.is_present:
+            wp = crane.wp_out_stamp.value
+            self.logger.debug(f"Crane dropped off workpiece at Stamp: {wp}")
+            self.stamp_product_type.value = 1 # wp.material_type
+            self.stamp_wp_at_stamp.value = True
+            self.stamp_workpiece_state.value = 1 # WP present
+    =}
+
+    reaction (stamp.wp_out) {=
+        wp = stamp.wp_out.value
+        self.logger.debug(f"Stamp completed workpiece: {wp}")
+        self.stamp_wp_at_stamp.value = False
+        self.stamp_workpiece_state.value = 2 # Processed WP
+    =}
+
+    output lsc_wp_out_ramp_start
+    lsc.wp_out_ramp_start -> lsc_wp_out_ramp_start
+    output lsc_wp_out_ramp_mid
+    lsc.wp_out_ramp_mid -> lsc_wp_out_ramp_mid
+    output lsc_wp_out_end
+    lsc.wp_out_end -> lsc_wp_out_end
+
+    reaction(lsc.wp_out_ramp_start, lsc.wp_out_ramp_mid, lsc.wp_out_pac, lsc.wp_out_end) {=
+        if lsc.wp_out_ramp_start.is_present:
+            wp = lsc.wp_out_ramp_start.value
+            self.logger.debug(f"WP at LSC ramp start: {wp}")
+            self.lsc_ramp_start_wp_count.value += 1
+        if lsc.wp_out_ramp_mid.is_present:
+            wp = lsc.wp_out_ramp_mid.value
+            self.logger.debug(f"WP at LSC ramp mid: {wp}")
+            self.lsc_ramp_mid_wp_count.value += 1
+        if lsc.wp_out_end.is_present:
+            wp = lsc.wp_out_end.value
+            self.logger.debug(f"WP at LSC ramp end: {wp}")
+            self.lsc_ramp_end_wp_count.value += 1
+        self.lsc_wp_product_type.value = 0
+        self.lsc_wp = None
     =}
 }

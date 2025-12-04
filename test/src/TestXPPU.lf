@@ -1,14 +1,27 @@
 target Python{
     fast: true,
     timeout: 180 s,
+    // logging: DEBUG,
 }
 
 import XPPU from "../../src/XPPU.lf"
 import FrostBus from "../../frost/src/lib/FrostBus.lf"
+import FrostMachine from "../../frost/src/lib/FrostMachine.lf"
 
 preamble{=
 import uuid
 from frost import *
+import numpy as np
+from copy import deepcopy
+from crane import CranePos
+from material import Position, Material, SteelMaterial, PlasticMaterial
+from shape_utils import set_wp_coordinates_to
+from machine_data_model.tracing import TraceLevel, clear_traces
+from machine_data_model.tracing.tracing_core import (
+    get_global_collector,
+    set_global_trace_level,
+)
+from machine_data_model.tracing.events import VariableWriteEvent
 
 logger = logging.getLogger("test_xppu")
 logger.setLevel(logging.DEBUG)
@@ -18,12 +31,66 @@ crane_dpos={
     CranePos.POS_ST:0,
     CranePos.POS_ST:2*np.pi
 }
+stack_buffer = [
+    SteelMaterial(id=str(uuid.uuid4())),
+    PlasticMaterial(id=str(uuid.uuid4())),
+    SteelMaterial(id=str(uuid.uuid4()))
+]
 =}
 
-main reactor {
-    xppu = new XPPU(name="xppu")
-    bus = new FrostBus(name="bus")
+reactor XPPUTester extends FrostMachine {
+    state remaining_iterations = {= len(stack_buffer) =}
+    state method_completed = False
+    logical action execute_demo
 
-    xppu.channel_out -> bus.channel_in
-    bus.channel_out -> xppu.channel_in after 0
+    reaction(connected_to_bus, execute_demo) -> channel_out{=
+        msg = self.message_builder.build_invoke_method_message(target=self._get_reactor_name(), node="/xPPUTester/Methods/RunFullDemo")
+        self._set_channel_out_port(msg, channel_out)
+
+    =}
+
+    reaction(response_messages) -> execute_demo {=
+        for bank_index, message in response_messages.value:
+
+            if message.sender != self._get_reactor_name():
+                continue
+
+            if message.header.msg_name != MethodMsgName.COMPLETED:
+                continue
+
+            if message.payload.node == "/xPPUTester/Methods/RunFullDemo":
+                self.remaining_iterations -= 1
+                if self.remaining_iterations > 0:
+                    self.logger.info(f"RunFullDemo iteration completed, {self.remaining_iterations} remaining. Restarting...")
+                    execute_demo.schedule(0)
+                else:
+                    self.logger.info("RunFullDemo method completed all iterations.")
+                    self.method_completed = True
+    =}
+
+    reaction (shutdown){=
+        assert self.remaining_iterations == 0, "Not all RunFullDemo iterations completed"
+        assert self.method_completed, "RunFullDemo method did not complete successfully"
+    =}
+}
+
+main reactor {
+    state received_wp = []
+
+    xppu = new XPPU(name="xppu", stack_buffer={=deepcopy(stack_buffer)=})
+    bus = new FrostBus(name="frost_bus", width=2)
+    xppu_tester = new XPPUTester(name="xppu_tester", update_interval=100 ms)
+
+    xppu.channel_out, xppu_tester.channel_out -> bus.channel_in
+    bus.channel_out -> xppu.channel_in, xppu_tester.channel_in after 0
+
+    reaction (xppu.lsc_wp_out_ramp_mid){=
+        wp = xppu.lsc_wp_out_ramp_mid.value
+        logger.info(f"Received workpiece at XPPU output: {wp}")
+        self.received_wp.append(wp)
+    =}
+
+    reaction (shutdown){=
+        assert self.received_wp == stack_buffer, f"Workpieces received {self.received_wp} do not match expected {stack_buffer}"
+    =}
 }

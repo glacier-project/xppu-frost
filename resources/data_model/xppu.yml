@@ -1,0 +1,231 @@
+name: xppu   # name of the machine
+machine_category: unknown   # category of the machine
+machine_type: unknown   # type of the machine
+machine_model: unknown   # model of the machine
+description: '' # description of the machine
+root: !!FolderNode
+  name: xPPU
+  description:
+  children:
+  - !!FolderNode
+    name: Stack
+    description:
+    children:
+    - !!FolderNode
+      name: Methods
+      description:
+      children:
+      - !!AsyncMethodNode
+        name: RequestWp
+        description:
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+    - !!FolderNode
+      name: Variables
+      description:
+      children:
+      - !!BooleanVariableNode
+        name: WpAvailable
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: ProductType
+        description:
+        initial_value: 0
+      - !!BooleanVariableNode
+        name: McRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McExtended
+        description:
+        initial_value: false
+  - !!FolderNode
+    name: Crane
+    description:
+    children:
+    - !!FolderNode
+      name: Methods
+      description:
+      children:
+      - !!AsyncMethodNode
+        name: RotateCrane
+        description:
+        parameters:
+        - !!StringVariableNode
+          name: Position
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+      - !!AsyncMethodNode
+        name: PickupWp
+        description:
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+      - !!AsyncMethodNode
+        name: PutdownWp
+        description:
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+    - !!FolderNode
+      name: Variables
+      description:
+      children:
+      - !!BooleanVariableNode
+        name: AtStack
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: AtLsc
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: AtStamp
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: HoldingWp
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: ProductType
+        description:
+        initial_value: 0
+      - !!BooleanVariableNode
+        name: McRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McExtended
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: Angle
+        description:
+        initial_value: -1
+  - !!FolderNode
+    name: Stamp
+    description:
+    children:
+    - !!FolderNode
+      name: Methods
+      description:
+      children:
+      - !!AsyncMethodNode
+        name: Stamp
+        description:  
+        parameters:
+        - !!StringVariableNode
+          name: stamp_cmd  # STAMP_LIGHT_P, STAMP_MEDIUM_P, STAMP_HEAVY_P
+          default_value: "STAMP_MEDIUM_P"
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+    - !!FolderNode
+      name: Variables
+      description:
+      children:
+      - !!NumericalVariableNode
+        name: WorkpieceState # 0: No WP, 1: WP present, 2: Processed WP
+        description:
+        initial_value: 0
+      - !!BooleanVariableNode
+        name: WpAtStamp
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: ProductType
+        description:
+        initial_value: 0
+      - !!BooleanVariableNode
+        name: McRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McExtended
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: BcRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: BcExtended
+        description:
+        initial_value: false
+  - !!FolderNode
+    name: LSC
+    description:
+    children:
+    - !!FolderNode
+      name: Methods
+      description:
+      children:
+      - !!AsyncMethodNode
+        name: SetWPDestination
+        description:
+        parameters:
+        - !!StringVariableNode
+          name: Destination
+        returns:
+        - !!BooleanVariableNode
+          name: Result
+    - !!FolderNode
+      name: Variables
+      description:
+      children:
+      # - !!BooleanVariableNode
+      #   name: WpAtRampStart
+      #   description:
+      #   initial_value: false
+      # - !!BooleanVariableNode
+      #   name: WpAtRampMid
+      #   description:
+      #   initial_value: false
+      # - !!BooleanVariableNode
+      #   name: WpAtRampEnd
+      #   description:
+      #   initial_value: false
+      - !!NumericalVariableNode
+        name: ProductType
+        description:
+        initial_value: 0
+      - !!BooleanVariableNode
+        name: McRampStartRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McRampStartExtended
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McRampMidRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McRampMidExtended
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McPACRetracted
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: McPACExtended
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: RampStartWpCount
+        description:
+        initial_value: 0
+      - !!NumericalVariableNode
+        name: RampMidWpCount
+        description:
+        initial_value: 0
+      - !!NumericalVariableNode
+        name: RampEndWpCount
+        description:
+        initial_value: 0
