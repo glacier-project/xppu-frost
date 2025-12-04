@@ -4,7 +4,7 @@ target Python{
         "../python-lib/material.py",
         "../python-lib/shape.py",
         "../python-lib/f_compare.py",
-        "../python-lib/shape_util.py",
+        "../python-lib/shape_utils.py",
     ],
 }
 
@@ -43,7 +43,7 @@ reactor Stack(
     state providing_wp = False
 
     mc = new MonostableCylinder(
-        name={= self.name + ".mc" =},     
+        name={= self.name + ".mc" =},
         retraction_speed=223.684, # m/s t= 0.38ms TODO check
         extension_speed=472.222, # m/s t= 0.18ms TODO check
         extension_length=0.07, # m
@@ -63,7 +63,7 @@ reactor Stack(
     reaction (provide_wp) -> mc.cmd{=
         if not provide_wp.is_present:
             return 0
-        
+
         # extend MC
         self.logger.debug("WP requested, extending MC")
         mc.cmd.set(MonostableCylinderCmd.EXTEND)
@@ -75,21 +75,18 @@ reactor Stack(
         mc_state = mc.s.value
 
         # set is_empty if no WPs are available
-        if mc_state == MonostableCylinderState.EXTENDED and not self._buffer:
-            if len(self._buffer) <= 0:
+        if mc_state == MonostableCylinderState.EXTENDED:
+            if not self._buffer:
                 self.logger.debug("No available WP")
                 is_empty.set(True)
-                return 0
-                
+            mc.cmd.set(MonostableCylinderCmd.RETRACT)
+
         # provide WP
-        if mc_state == MonostableCylinderState.RETRACTED and self.providing_wp:
+        if mc_state == MonostableCylinderState.RETRACTED and self.providing_wp and self._buffer:
             self.providing_wp = False
             wp = self._buffer.pop(0)
             wp_at_pickup.set(wp)
             set_wp_coordinates_to(wp, self._pu_area)
-            mc.cmd.set(MonostableCylinderCmd.RETRACT)
-            self.logger.debug(f"WP {wp} available for pickup, retracting MC")
-
-        
+            self.logger.debug(f"WP {wp} available for pickup")
     =}
 }
