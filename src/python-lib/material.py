@@ -17,11 +17,11 @@ class MaterialType(str, Enum):
 class Material:
 
     def __init__(
-            self, 
+            self,
             id: int = -1,
             m_type: MaterialType = MaterialType.UNDEFINED,
             weight: float = 0,
-            shape: Shape = None,
+            shape: Shape | None = None,
             cap: str = '',
             stamped: bool = False
             ):
@@ -41,11 +41,10 @@ class Material:
                 self.m_type == other.m_type and
                 self.weight == other.weight and
                 self.cap == other.cap and
-                self.stamped == other.stamped and
-                self.shape == other.shape)
-    
+                self.stamped == other.stamped)
+
     def __hash__(self) -> int:
-        return hash((self.id, self.m_type, self.weight, self.cap, self.stamped, self.shape))
+        return hash((self.id, self.m_type, self.weight, self.cap, self.stamped))
 
     def __str__(self) -> str:
         return f'Material(id={self.id}, m_type={self.m_type}, weight={self.weight}, cap={self.cap}, stamped={self.stamped}, shape={self.shape})'
@@ -60,16 +59,16 @@ class SteelMaterial(Material):
             self,
             id: int = -1,
             weight: float = 0,
-            shape: Shape = None
+            shape: Shape | None = None
             ):
         super().__init__(id=id,m_type=MaterialType.STEEL,weight=weight,shape=shape)
-        
+
 class PlasticMaterial(Material):
 
     def __init__(
             self,
             id: int = -1,
             weight: float = 0,
-            shape: Shape = None
+            shape: Shape | None = None
             ):
         super().__init__(id=id,m_type=MaterialType.PLASTIC,weight=weight,shape=shape)

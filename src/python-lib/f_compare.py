@@ -1,17 +1,17 @@
-import numpy as np 
+import numpy as np
 
 EPS = np.finfo(float).eps
 
 def are_nearly_equal(n1: float, n2: float, relative_error=1e-2, min=np.finfo(float).min):
     if not np.isfinite(n1) or not np.isfinite(n2):
         return False
-    
+
     diff = np.abs(n1-n2)
     if diff < min:
         return True
-    
+
     return (diff / max(np.abs(n1),np.abs(n2))) <= relative_error
-    
+
 def approximately_zero(n1: float, eps:float = EPS):
     return np.abs(n1) <= eps
 

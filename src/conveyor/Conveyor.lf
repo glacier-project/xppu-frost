@@ -1,6 +1,6 @@
 target Python{
     files: [
-        "../python-lib/conveyor_utils.py",
+        "../python-lib/conveyor.py",
         "../python-lib/f_compare.py",
         "../python-lib/shape.py",
         "../python-lib/material.py",
@@ -17,6 +17,7 @@ from f_compare import cos, sin
 from shape import ConveyorBeltShape, Point, ComponentShape
 from material import Material
 from position_sensor import PositionSensor
+from conveyor import ConveyorCmd
 =}
 
 reactor Conveyor(
@@ -31,8 +32,8 @@ reactor Conveyor(
 
     input wp_in_start
     input wp_in_end
-    input cmd 
-    
+    input cmd
+
     output wp_out_start
     output wp_out_end
 
@@ -50,11 +51,11 @@ reactor Conveyor(
 
     method add_guard(guard){=
         """Adds a guard to the conveyor to control workpiece flow.
-        
+
         Args:
             guard (Guard): The guard to be added.
         """
-        
+
         assert isinstance(guard, Guard)
         self._guards.append(guard)
     =}
@@ -63,7 +64,7 @@ reactor Conveyor(
         """
         Registers a rule that triggers an action when a position sensor detects
         a workpiece while a specific command is active.
-        
+
         Args:
             sensor (PositionSensor): PositionSensor instance to monitor.
             triggering_cmd (ConveyorCmd): Command that must be active for the trigger to fire.
@@ -85,9 +86,9 @@ reactor Conveyor(
             mc_cmd_evt (event): Event to send commands to the MC.
             wp_out_evt (event): Event to output workpieces that exit.
         """
-        
+
         if mc_state == MonostableCylinderState.EXTENDING:
-            # Activate guard stopping WPs 
+            # Activate guard stopping WPs
             mc_guard.activate()
             mc_guard.allow_wp(expected_wp)
 
@@ -170,11 +171,11 @@ reactor Conveyor(
     // @label handle_wp_in
     reaction (wp_in_start, wp_in_end) {=
         if wp_in_start.is_present:
-            wp = wp_in_start.value  
+            wp = wp_in_start.value
             self._conveyor_shape.set_init_coordinates(wp.shape)
         else:
             assert wp_in_end.is_present
-            wp = wp_in_end.value  
+            wp = wp_in_end.value
             self._conveyor_shape.set_init_coordinates(wp.shape, in_direction="exit")
 
         assert isinstance(wp, Material)
@@ -206,8 +207,8 @@ reactor Conveyor(
             shape = wp.shape
             shape.translate(dx, dy)
             self.logger.debug(f"Moved WP {wp} to position {shape.centroid_pos}")
-            
-            for guard in guards: 
+
+            for guard in guards:
                 if not guard.is_active(wp):
                     continue
                 self.logger.debug(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
@@ -223,7 +224,7 @@ reactor Conveyor(
 
             if i == 0 and not self._conveyor_shape.contains(shape):
                 # remove WP
-                self.remove_wp(wp, wp_out) 
+                self.remove_wp(wp, wp_out)
                 self.logger.debug(f"WP {wp} exited conveyor at position {shape.centroid_pos}")
 
         # Check position sensor triggers

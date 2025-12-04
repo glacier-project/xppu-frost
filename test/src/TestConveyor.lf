@@ -20,7 +20,7 @@ main reactor TestConveyor {
 
     state wps = {=
         [
-            SteelMaterial(id=str(uuid.uuid4())), 
+            SteelMaterial(id=str(uuid.uuid4())),
             SteelMaterial(id=str(uuid.uuid4()))
         ]
     =}

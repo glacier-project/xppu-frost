@@ -36,4 +36,3 @@ class Guard:
 
     def __str__(self) -> str:
         return f'Guard({self.name}, {self.guard_area})'
-    

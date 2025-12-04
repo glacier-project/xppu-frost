@@ -16,19 +16,19 @@ logger.setLevel(logging.DEBUG)
 
 main reactor TestLSConveyor {
 
-    state wp_index = 0    
+    state wp_index = 0
     state wps = {=
         [
             (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_RAMP_START),
-            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_PAC), 
-            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_RAMP_MID), 
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_PAC),
+            (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_RAMP_MID),
             (SteelMaterial(id=str(uuid.uuid4())), LSCCmdType.T_TO_END)
         ]
     =}
     state c_wps_received = []
 
-    timer add_wps(0 ms, 100 ms) 
-    
+    timer add_wps(0 ms, 100 ms)
+
     c = new LSConveyor(name="lsc")
 
     reaction (add_wps) -> c.wp_in_start, c.cmd{=
