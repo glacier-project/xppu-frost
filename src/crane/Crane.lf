@@ -1,7 +1,8 @@
 target Python{
     files: [
-        "../python-lib/crane_utils.py",
+        "../python-lib/crane.py",
         "../python-lib/material.py",
+        "../python-lib/shape.py",
     ]
 }
 
@@ -11,8 +12,9 @@ import MonostableCylinder from "../common/MonostableCylinder.lf"
 
 preamble{=
 import numpy as np
-from crane_utils import CraneCmd, CranePos
+from crane import CraneCmd, CranePos
 from material import Material
+from shape import Point
 =}
 
 reactor Crane(
@@ -26,11 +28,14 @@ reactor Crane(
     input wp_in_lsc
     input cmd
 
-    output position 
+    output position
+    output angle
     output current_wp
     output wp_out_stack
     output wp_out_stamp
     output wp_out_lsc
+    output mc_state
+    mc.s -> mc_state;
 
     state _wp_in_stack
     state _wp_in_stamp
@@ -49,16 +54,17 @@ reactor Crane(
         is_retracted=False
     )
     r_base = new RBase(
-        name={= self.name + ".r_base" =}, 
+        name={= self.name + ".r_base" =},
         tick_interval=1 ms,
         ang_speed=0.698132 # rad/s
     )
     r_base.d_pos -> position
+    r_base.angle -> angle
 
     method set_wp_in(wp, wp_area){=
         """
         Sets the workpiece in the specified area.
-        
+
         Args:
             wp (Material): The workpiece to set.
             wp_area (str): The area to set the workpiece in. Must be one of "stack", "stamp", or "lsc".
@@ -68,7 +74,7 @@ reactor Crane(
         setattr(self, f"_wp_in_{wp_area}", wp)
     =}
 
-    // @label handle_wp_in 
+    // @label handle_wp_in
     reaction (wp_in_stack, wp_in_stamp, wp_in_lsc){=
         if wp_in_stack.is_present:
             self.set_wp_in(wp_in_stack.value, "stack")
@@ -116,15 +122,15 @@ reactor Crane(
             d_theta = current_angle - self._current_angle if self._current_angle is not None else 0
             self.logger.debug(f"Rotating WP by {d_theta} radians around crane base at ({self.ref_x}, {self.ref_y})")
             self._wp.shape.rotate(d_theta, origin=Point(self.ref_x, self.ref_y))
-        
-        self._current_angle = current_angle        
+
+        self._current_angle = current_angle
     =}
 
     // @label handle_mc_state_change
     reaction (mc.s) -> current_wp, wp_out_stack, wp_out_stamp, wp_out_lsc, mc.cmd{=
         mc_state = mc.s.value
         self.logger.debug(f"Crane MC state changed to {mc_state.name}")
-    
+
         crane_position = self._current_postion
         if mc_state == MonostableCylinderState.EXTENDING and self._is_picking_up:
             self.logger.info(f"Crane MC extending at position {crane_position}")
@@ -167,6 +173,7 @@ reactor Crane(
                     self.logger.debug(f"Dropping WP at stamp: {self._wp}")
                 self.logger.info(f"Crane MC retracted at position {crane_position}, released WP: {self._wp}")
                 self._wp = None
+                current_wp.set(self._wp)
     =}
 
 }

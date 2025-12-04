@@ -3,7 +3,6 @@ target Python{
     timeout: 180 s,
     files: [
         "../../src/python-lib/material.py",
-        "../../src/python-lib/shape.py",
         "../../src/python-lib/f_compare.py"
     ]
 }
@@ -13,11 +12,8 @@ import Crane from "../../src/crane/Crane.lf"
 preamble{=
 import uuid
 from frost import *
-from material import SteelMaterial, Material
-from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
-from crane_utils import CraneCmd
 from copy import deepcopy
-from shape import Point
+from material import SteelMaterial, Material
 
 logger = logging.getLogger("test_crane")
 logger.setLevel(logging.DEBUG)
@@ -58,7 +54,7 @@ main reactor {
             (CraneCmd.PUTDOWN_WP, CranePos.POS_S, MSECS(20800))   # Putdown WP at S
         ]
 
-        cmd_time = 0 
+        cmd_time = 0
         for crane_cmd, expected_pos, end_time in self.cmds:
             logger.debug(f"Scheduling r_base_cmd at {cmd_time} ns to position {expected_pos}")
             # small delay to ensure the command is processed after the previous position is reached
@@ -86,13 +82,14 @@ main reactor {
         crane_cmd, expected_pos, expected_time = self.cmds.pop(0)
 
         logger.debug(f"Crane WP reaction at time {lf.time.logical_elapsed()} ns: current_wp={c.current_wp.value}, wp_out_stack={c.wp_out_stack.value}, wp_out_stamp={c.wp_out_stamp.value}, wp_out_lsc={c.wp_out_lsc.value}")
-        
+
         if crane_cmd == CraneCmd.PICKUP_WP:
             assert c.current_wp.is_present, "Expected WP to be held by crane after PICKUP_WP command"
             assert sum([c.wp_out_stack.is_present, c.wp_out_stamp.is_present, c.wp_out_lsc.is_present]) == 0, "WP should not be output at any location when held by crane"
             wp = c.current_wp.value
         elif crane_cmd == CraneCmd.PUTDOWN_WP:
-            assert not c.current_wp.is_present, "Expected crane to not hold WP after PUTDOWN_WP command"
+            if c.current_wp.is_present:
+                assert c.current_wp.value is None, "Expected crane to not hold WP after PUTDOWN_WP command"
             assert sum([c.wp_out_stack.is_present, c.wp_out_stamp.is_present, c.wp_out_lsc.is_present]) == 1, "WP should only be output at one location at a time"
             if c.wp_out_stack.is_present:
                 wp = c.wp_out_stack.value
@@ -100,7 +97,7 @@ main reactor {
                 wp = c.wp_out_stamp.value
             elif c.wp_out_lsc.is_present:
                 wp = c.wp_out_lsc.value
-        
+
         assert wp == self.wp, f"Expected WP {self.wp}, got {wp}"
     =}
 
