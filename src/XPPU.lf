@@ -156,7 +156,7 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
         self.data_model.get_node(CRANE_PUTDOWN_WP_METHOD_NODE).callback = lambda: self.execute_crane_cmd(CraneCmd.PUTDOWN_WP)
         self.data_model.get_node(STAMP_STAMP_METHOD_NODE).callback = self.execute_stamp_cmd
         self.data_model.get_node(LSC_SET_WP_DESTINATION_METHOD_NODE).callback = self.execute_lsc_cmd
-        
+
         # Stack data model nodes
         self.stack_wp_available = self.data_model.get_node(STACK_WP_AVAILABLE_NODE)
         self.stack_product_type = self.data_model.get_node(STACK_PRODUCT_TYPE_NODE)
@@ -312,8 +312,8 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
 
             self.crane_holding_wp.value = (wp is not None)
             # TODO: define product type mapping
-            self.crane_product_type.value = 1 if wp is not None else 0 
-             
+            self.crane_product_type.value = 1 if wp is not None else 0
+
         if crane.angle.is_present:
             # self.logger.debug(f"Updating crane angle to {crane.angle.value}")
             self.crane_angle.value = crane.angle.value

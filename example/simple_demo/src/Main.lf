@@ -1,6 +1,6 @@
 target Python{
     fast: true,     # Set to false to enable real-time execution
-    timeout: 180 s, # Maximum logical execution time, comment out for no limit 
+    timeout: 180 s, # Maximum logical execution time, comment out for no limit
 }
 
 import XPPU from "../../../src/XPPU.lf"
@@ -19,7 +19,7 @@ from shape_utils import set_wp_coordinates_to
 from machine_data_model.tracing import TraceLevel, clear_traces
 
 # Scheduling imports
-from frost_planner.core.base import TaskStatus
+from frost_planner.core.base import TaskStatus, Job
 from frost_planner.generator.instance_generator import load_instance_from_json
 from frost_planner.solver.genetic_solver import GeneticAlgorithmSolver
 from frost_planner.executor.dynamic_executor import DynamicExecutor
@@ -46,7 +46,7 @@ reactor KafkaProducer extends FrostReactor {
                 target="xppu",
                 node=xppu_var
             )
-            for xppu_var in XPPU_DATA_MODEL_NODES    
+            for xppu_var in XPPU_DATA_MODEL_NODES
         ]
 
         self._set_channel_out_port(msgs, channel_out)
@@ -61,7 +61,7 @@ reactor KafkaProducer extends FrostReactor {
             self.logger.info(f"KafkaProducer: Received variable update message: {message}")
     =}
 
-    
+
 }
 
 reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) extends FrostMachine{
@@ -70,6 +70,7 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 
     state scheduling_instance = _scheduling_instance
     state scheduling_interval = _scheduling_interval # in seconds
+    state recipe_template = "undefined"
     state _executor
     state _active_tasks = {={}=}
     state request_wp = True
@@ -80,6 +81,8 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
     reaction(startup) {=
         self.scheduling_instance = load_instance_from_json(self.scheduling_instance)
         self._executor = DynamicExecutor(GeneticAlgorithmSolver(instance=self.scheduling_instance))
+
+
     =}
 
     method create_method_request(t, method_path, args, kwargs){=
@@ -137,7 +140,7 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
     // =}
 
     // // @label run_tasks
-    // reaction(start_tasks) {= 
+    // reaction(start_tasks) {=
     //     self.logger.debug(f"Starting tasks: {start_tasks.value}")
 
     //     for task, machine in start_tasks.value:

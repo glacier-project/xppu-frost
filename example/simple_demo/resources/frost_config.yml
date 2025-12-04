@@ -14,5 +14,6 @@ reactors:
     parameters:
       data_model_path: resources/data_model/xppu_scheduler.yml
       scheduling_instance: resources/scheduling_instances/instance.json
+      recipe_template: resources/template/sc14_recipe.json
   kafka_producer:
     logging_level: INFO

@@ -25,7 +25,7 @@ reactor Stamp(
     stamp_heavy_p_delay = 2.4 # s
 ) extends FrostBase{
     preamble{=
-        LEGNTH=0.24
+        LENGTH=0.24
         WIDTH=0.055
         PU_OFFSET=0
         PU_LENGTH=0.055
@@ -45,13 +45,13 @@ reactor Stamp(
     state _current_cmd
     state _wp
 
-    state _c_shape = {=ComponentShape(centroid_pos=Point(self.ref_x+self.LEGNTH/2, self.ref_y+self.WIDTH/2, 0), base=self.LEGNTH, height=self.WIDTH, angle=self.c_angle)=}
+    state _c_shape = {=ComponentShape(centroid_pos=Point(self.ref_x+self.LENGTH/2, self.ref_y+self.WIDTH/2, 0), base=self.LENGTH, height=self.WIDTH, angle=self.c_angle)=}
     state _stamp_area = {= self._c_shape.get_sensor_shape(self.STAMP_OFFSET, self.STAMP_WIDTH, self.STAMP_LENGTH) =}
     state _pu_area = {= self._c_shape.get_sensor_shape(self.PU_OFFSET, self.PU_WIDTH, self.PU_LENGTH) =}
     state _stamp_delay = 2 # s
 
     mc = new MonostableCylinder(
-        name={= self.name + ".mc" =},     
+        name={= self.name + ".mc" =},
         retraction_speed=223.684, # m/s t= 0.38ms TODO check
         extension_speed=472.222, # m/s t= 0.18ms TODO check
         extension_length=0.13, # m
@@ -60,10 +60,10 @@ reactor Stamp(
     mc.s -> mc_state;
 
     bc = new MonostableCylinder(
-        name={= self.name + ".bc" =},     
+        name={= self.name + ".bc" =},
         retraction_speed=223.684, # m/s t= 0.38ms TODO check
         extension_speed=472.222, # m/s t= 0.18ms TODO check
-        extension_length=0.055 # m    
+        extension_length=0.055 # m
     )
     bc.s -> bc_state;
 
@@ -78,7 +78,7 @@ reactor Stamp(
             cmd_delay = self.stamp_heavy_p_delay
         else:
             raise ValueError(f"Unknown stamping command: {current_cmd}")
-        
+
         return round(cmd_delay * SECS(1))
     =}
 
@@ -86,7 +86,7 @@ reactor Stamp(
         assert self._wp is not None, "No workpiece to stamp"
         self._current_cmd = cmd.value
         self.logger.info(f"Starting stamping workpiece {self._wp} at stamp with command {self._current_cmd}, retracting mc and extending bc")
-         
+
         # end_stamp.schedule(self.stamp_medium_p_delay * SECS(1))
         mc.cmd.set(MonostableCylinderCmd.RETRACT)
     =}
@@ -102,7 +102,7 @@ reactor Stamp(
             if mc.s.value == MonostableCylinderState.EXTENDED:
                 self.logger.info(f"MC extended after stamping for workpiece {self._wp}")
                 self._current_cmd = None
-                wp_out.set(self._wp) 
+                wp_out.set(self._wp)
 
         if bc.s.is_present:
             if bc.s.value == MonostableCylinderState.EXTENDED:

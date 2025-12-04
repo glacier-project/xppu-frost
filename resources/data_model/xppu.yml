@@ -116,11 +116,11 @@ root: !!FolderNode
       children:
       - !!AsyncMethodNode
         name: Stamp
-        description:  
+        description:
         parameters:
         - !!StringVariableNode
           name: stamp_cmd  # STAMP_LIGHT_P, STAMP_MEDIUM_P, STAMP_HEAVY_P
-          default_value: "STAMP_MEDIUM_P"
+          default_value: STAMP_MEDIUM_P
         returns:
         - !!BooleanVariableNode
           name: Result
@@ -189,8 +189,7 @@ root: !!FolderNode
       #   name: WpAtRampEnd
       #   description:
       #   initial_value: false
-      - !!NumericalVariableNode
-        name: ProductType
+      - !!NumericalVariableNode name: ProductType
         description:
         initial_value: 0
       - !!BooleanVariableNode
