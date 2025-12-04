@@ -1,11 +1,15 @@
 time_precision: NSECS
-logging_level: DEBUG
+logging_level: WARNING
 reactors:
   xppu:
-    logging_level: DEBUG
+    logging_level: INFO
     parameters:
-      data_model_path: "resources/data_model/xppu.yml"
-  bus:
-    logging_level: DEBUG
+      data_model_path: ../resources/data_model/xppu.yml
+  frost_bus:
+    logging_level: WARNING
     parameters:
-      data_model_path: "resources/data_model/bus.yml"
+      data_model_path: ../resources/data_model/bus.yml
+  xppu_tester:
+    logging_level: INFO
+    parameters:
+      data_model_path: ../resources/data_model/xppu_tester.yml
