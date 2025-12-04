@@ -1,0 +1,18 @@
+time_precision: MSECS
+logging_level: WARNING
+reactors:
+  xppu:
+    logging_level: INFO
+    parameters:
+      data_model_path: ../../resources/data_model/xppu.yml
+  frost_bus:
+    logging_level: WARNING
+    parameters:
+      data_model_path: ../../resources/data_model/bus.yml
+  xppu_scheduler:
+    logging_level: INFO
+    parameters:
+      data_model_path: resources/data_model/xppu_scheduler.yml
+      scheduling_instance: resources/scheduling_instances/instance.json
+  kafka_producer:
+    logging_level: INFO

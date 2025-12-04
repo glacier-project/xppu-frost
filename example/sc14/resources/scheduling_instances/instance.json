@@ -1,0 +1,27 @@
+{
+    "jobs": [],
+    "machines": [
+        {
+            "id": "46652334-df31-4524-a6cc-0fbbd523002a",
+            "name": "work_cell_1",
+            "capabilities": [
+                "stack", "crane", "stamp"
+            ]
+        },
+        {
+            "id": "dbb43f4b-d9ea-413c-9a7e-87a85632ed36",
+            "name": "work_cell_lsc",
+            "capabilities": [
+                "lsc"
+            ]
+        }
+    ],
+    "travel_times": {
+        "46652334-df31-4524-a6cc-0fbbd523002a": {
+            "dbb43f4b-d9ea-413c-9a7e-87a85632ed36": 0
+        },
+        "dbb43f4b-d9ea-413c-9a7e-87a85632ed36": {
+            "46652334-df31-4524-a6cc-0fbbd523002a": 9999999999
+        }
+    }
+}
