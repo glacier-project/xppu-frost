@@ -32,7 +32,7 @@ show_progress() {
     local percentage=$((current * 100 / total))
     local filled=$((current * bar_length / total))
     local empty=$((bar_length - filled))
-    
+
     printf "\r\033[K${CYAN}%s${RESET} [${GREEN}%s${RESET}%s] ${BOLD}%d/%d${RESET} ${YELLOW}(%d%%)${RESET} ${BLUE}> %s${RESET}" \
         "$prefix" \
         "$(printf "%*s" $filled | tr ' ' '#')" \
@@ -88,29 +88,31 @@ validate_file() {
 build_tests() {
     local files=("$@")
     local failed_builds=0
-    
+
     if [ ${#files[@]} -eq 0 ]; then
         echo "No files to build"
         return 0
     fi
-    
+
     printf "\n${BOLD}${BLUE}🔨 Building ${#files[@]} test(s)...${RESET}\n"
     local current=0
-    
+
     for file in "${files[@]}"; do
         current=$((current + 1))
-        local basename=$(basename "$file" .lf)
+        local basename
+        basename=$(basename "$file" .lf)
         show_progress $current ${#files[@]} "Building" "$basename"
-        
+
         if ! validate_file "$file"; then
             BUILD_FAILED+=("$basename")
             failed_builds=$((failed_builds + 1))
             continue
         fi
-        
+
         # Convert the name to snake_case
-        local snake_case_name=$(echo "$basename" | sed -r 's/([a-z])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')
-        
+        local snake_case_name
+        snake_case_name=$(echo "$basename" | sed -r 's/([a-z])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')
+
         # Capture build output to show only on failure
         if build_output=$(lfc "$file" 2>&1); then
             BUILD_PASSED+=("$basename")
@@ -122,14 +124,14 @@ build_tests() {
             failed_builds=$((failed_builds + 1))
         fi
     done
-    
+
     echo  # Clear progress bar line
-    
+
     if [ $failed_builds -gt 0 ]; then
         printf "${RED}⚠️  Warning: $failed_builds build(s) failed${RESET}\n" >&2
         return 1
     fi
-    
+
     printf "${GREEN}✅ All builds completed successfully${RESET}\n"
     return 0
 }
@@ -140,12 +142,13 @@ run_tests() {
     local failed_runs=0
     local runnable_files=()
     local skipped_count=0
-    
+
     # Filter files to only include successfully built tests
     for file in "${files[@]}"; do
-        local basename=$(basename "$file" .lf)
+        local basename
+        basename=$(basename "$file" .lf)
         local is_built=false
-        
+
         # If BUILD_PASSED is empty (e.g., --run-only mode), check if binary exists
         if [ ${#BUILD_PASSED[@]} -eq 0 ]; then
             # In run-only mode, check if the binary exists
@@ -161,7 +164,7 @@ run_tests() {
                 fi
             done
         fi
-        
+
         if [ "$is_built" = true ]; then
             runnable_files+=("$file")
         else
@@ -169,7 +172,7 @@ run_tests() {
             skipped_count=$((skipped_count + 1))
         fi
     done
-    
+
     if [ ${#runnable_files[@]} -eq 0 ]; then
         if [ $skipped_count -gt 0 ]; then
             printf "\n${YELLOW}⏭️  All tests skipped due to build failures${RESET}\n"
@@ -178,7 +181,7 @@ run_tests() {
         fi
         return 0
     fi
-    
+
     local total_to_run=${#runnable_files[@]}
     printf "\n${BOLD}${CYAN}🚀 Running $total_to_run test(s)...${RESET}"
     if [ $skipped_count -gt 0 ]; then
@@ -186,23 +189,25 @@ run_tests() {
     fi
     printf "\n"
     local current=0
-    
+
     for file in "${runnable_files[@]}"; do
         current=$((current + 1))
-        local basename=$(basename "$file" .lf)
+        local basename
+        basename=$(basename "$file" .lf)
         show_progress $current $total_to_run "Running" "$basename"
-        
+
         if ! validate_file "$file"; then
             RUN_FAILED+=("$basename")
             failed_runs=$((failed_runs + 1))
             continue
         fi
-        
+
         # Convert the name to snake_case
-        local snake_case_name=$(echo "$basename" | sed -r 's/([a-z])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')
+        local snake_case_name
+        snake_case_name=$(echo "$basename" | sed -r 's/([a-z])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')
         local binary_path="./bin/${basename}"
         local config_path="resources/config/${snake_case_name}.yml"
-        
+
         # Check if binary exists
         if [ ! -f "$binary_path" ]; then
             printf "\n"  # New line to preserve progress bar
@@ -211,7 +216,7 @@ run_tests() {
             failed_runs=$((failed_runs + 1))
             continue
         fi
-        
+
         # Check if config exists (optional warning)
         if [ ! -f "$config_path" ]; then
             if run_output=$("$binary_path" 2>&1); then
@@ -236,14 +241,14 @@ run_tests() {
             fi
         fi
     done
-    
+
     echo  # Clear progress bar line
-    
+
     if [ $failed_runs -gt 0 ]; then
         printf "${RED}⚠️  Warning: $failed_runs test(s) failed${RESET}\n" >&2
         return 1
     fi
-    
+
     printf "${GREEN}✅ All tests completed successfully${RESET}\n"
     return 0
 }
@@ -314,14 +319,14 @@ printf "${BOLD}${BLUE}═══════════════════�
 if [ ${#BUILD_PASSED[@]} -gt 0 ] || [ ${#BUILD_FAILED[@]} -gt 0 ]; then
     printf "\n${BOLD}${BLUE}🔨 BUILD RESULTS:${RESET}\n"
     printf "${BLUE}┌───────────────────────────────────────────┐${RESET}\n"
-    
+
     if [ ${#BUILD_PASSED[@]} -gt 0 ]; then
         printf "${BLUE}│${RESET} ${GREEN}${BOLD}✅ PASSED (${#BUILD_PASSED[@]})${RESET}                             ${BLUE}│${RESET}\n"
         for test in "${BUILD_PASSED[@]}"; do
             printf "${BLUE}│${RESET}   ${GREEN}🟢 %-36s${RESET} ${BLUE}│${RESET}\n" "$test"
         done
     fi
-    
+
     if [ ${#BUILD_FAILED[@]} -gt 0 ]; then
         if [ ${#BUILD_PASSED[@]} -gt 0 ]; then
             printf "${BLUE}├───────────────────────────────────────────┤${RESET}\n"
@@ -331,7 +336,7 @@ if [ ${#BUILD_PASSED[@]} -gt 0 ] || [ ${#BUILD_FAILED[@]} -gt 0 ]; then
             printf "${BLUE}│${RESET}   ${RED}🔴 %-36s${RESET} ${BLUE}│${RESET}\n" "$test"
         done
     fi
-    
+
     printf "${BLUE}└───────────────────────────────────────────┘${RESET}\n"
 fi
 
@@ -339,9 +344,9 @@ fi
 if [ ${#RUN_PASSED[@]} -gt 0 ] || [ ${#RUN_FAILED[@]} -gt 0 ] || [ ${#RUN_SKIPPED[@]} -gt 0 ]; then
     printf "\n${BOLD}${CYAN}🚀 RUN RESULTS:${RESET}\n"
     printf "${CYAN}┌───────────────────────────────────────────┐${RESET}\n"
-    
+
     sections_printed=0
-    
+
     if [ ${#RUN_PASSED[@]} -gt 0 ]; then
         printf "${CYAN}│${RESET} ${GREEN}${BOLD}✅ PASSED (${#RUN_PASSED[@]})${RESET}                             ${CYAN}│${RESET}\n"
         for test in "${RUN_PASSED[@]}"; do
@@ -349,7 +354,7 @@ if [ ${#RUN_PASSED[@]} -gt 0 ] || [ ${#RUN_FAILED[@]} -gt 0 ] || [ ${#RUN_SKIPPE
         done
         sections_printed=$((sections_printed + 1))
     fi
-    
+
     if [ ${#RUN_FAILED[@]} -gt 0 ]; then
         if [ $sections_printed -gt 0 ]; then
             printf "${CYAN}├───────────────────────────────────────────┤${RESET}\n"
@@ -360,7 +365,7 @@ if [ ${#RUN_PASSED[@]} -gt 0 ] || [ ${#RUN_FAILED[@]} -gt 0 ] || [ ${#RUN_SKIPPE
         done
         sections_printed=$((sections_printed + 1))
     fi
-    
+
     if [ ${#RUN_SKIPPED[@]} -gt 0 ]; then
         if [ $sections_printed -gt 0 ]; then
             printf "${CYAN}├───────────────────────────────────────────┤${RESET}\n"
@@ -370,7 +375,7 @@ if [ ${#RUN_PASSED[@]} -gt 0 ] || [ ${#RUN_FAILED[@]} -gt 0 ] || [ ${#RUN_SKIPPE
             printf "${CYAN}│${RESET}   ${YELLOW}⚪ %-36s${RESET} ${CYAN}│${RESET}\n" "$test"
         done
     fi
-    
+
     printf "${CYAN}└───────────────────────────────────────────┘${RESET}\n"
 fi
 

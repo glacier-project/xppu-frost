@@ -1,4 +1,5 @@
-typing_extensions
-git+https://github.com/esd-univr/machine-data-model.git@dev
-shapely
-numpy
+typing_extensions==4.15.0
+shapely==2.1.2
+numpy==2.3.4
+git+https://github.com/glacier-project/machine-data-model.git@dev
+git+https://github.com/glacier-project/frost-planner.git@develop

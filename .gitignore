@@ -173,3 +173,4 @@ bin/
 Lingo.lock
 *.csv
 *.tex
+.vscode

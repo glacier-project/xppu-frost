@@ -49,6 +49,7 @@ python3 -m pip install -r requirements.txt
 ### 4. Configure your project
 
 Edit the configuration file at `resources/frost_config.yml` to customize:
+
 - Logging time precision
 - Logging level of each reactor
 - Reactor initial parameters
@@ -59,6 +60,7 @@ See the [Configuration](#configuration) section below for detailed information.
 ### 5. Customize your data model
 
 Edit or replace `resources/data_model/hello.yml` to define your machine's data model, including:
+
 - Variables (numerical, string, boolean, object)
 - Methods
 - Folder structure
@@ -66,6 +68,7 @@ Edit or replace `resources/data_model/hello.yml` to define your machine's data m
 ### 6. Implement your application
 
 Edit `src/Main.lf` to:
+
 - Import custom machine reactors
 - Instantiate your machines
 - Configure the FrostBus connections
@@ -86,7 +89,7 @@ frost-template/
 ├── resources/
 │   ├── frost_config.yml     # Frost configuration
 │   └── data_model/
-│       └── frost_bus.yml    # Bus data model 
+│       └── frost_bus.yml    # Bus data model
 │       └── hello.yml        # Hello data model
 ├── frost/                   # Frost framework (submodule)
 │   ├── src/
@@ -107,13 +110,13 @@ import FrostMachine from "../frost/src/lib/FrostMachine.lf"
 
 reactor MyMachine extends FrostMachine {
     state my_variable
-    
+
     reaction(startup) {=
         # Link state variables to data model nodes
         self.my_variable = self.data_model.get_node("MyMachine/Status")
         self.logger.info("MyMachine initialized")
     =}
-    
+
     timer t(0 s, 1 s)
     reaction(t) {=
         # Implement your machine logic here
@@ -134,7 +137,7 @@ main reactor {
         name="my_machine",
         model_path="path/to/my_machine_model.yml"
     )
-    
+
     bus.channel_out -> machine.channel_in
     machine.channel_out -> bus.channel_in after 0
 }
@@ -170,13 +173,14 @@ reactors:
 
 1. **Name Matching**: The configuration keys must match the `name` parameter you provide when instantiating reactors in your `.lf` files.
 
-2. **Hierarchical Structure**: Nested reactors are configured under their parent's `reactors` section.
+1. **Hierarchical Structure**: Nested reactors are configured under their parent's `reactors` section.
 
-3. **Parameter Passing**: The `parameters` section allows you to set initial values for reactor parameters, particularly:
+1. **Parameter Passing**: The `parameters` section allows you to set initial values for reactor parameters, particularly:
+
    - `data_model_path`: Path to the YAML data model file
    - Any state variables defined in the reactor
 
-4. **Logging Levels**: Each reactor can have its own logging level, overriding the global setting. This is useful for debugging specific components without flooding logs.
+1. **Logging Levels**: Each reactor can have its own logging level, overriding the global setting. This is useful for debugging specific components without flooding logs.
 
 ## Docker Support
 
@@ -189,10 +193,11 @@ docker build -t frost-app .
 ```
 
 The Dockerfile performs the following steps:
+
 1. Installs Lingua Franca compiler (`lfc`)
-2. Installs Python dependencies from `requirements.txt`
-3. Compiles the `src/Main.lf` file
-4. Creates a minimal runtime image with only the necessary components
+1. Installs Python dependencies from `requirements.txt`
+1. Compiles the `src/Main.lf` file
+1. Creates a minimal runtime image with only the necessary components
 
 ### Running the Container
 
@@ -203,6 +208,7 @@ docker run --rm frost-app
 ## Documentation
 
 For more detailed information about Frost and its components, please refer to the following resources:
+
 - [Lingua Franca Documentation](https://www.lf-lang.org/docs)
 - [Frost Repository](https://github.com/esd-univr/frost)
 - [Machine Data Model](https://github.com/esd-univr/machine-data-model)

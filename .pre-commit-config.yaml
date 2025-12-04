@@ -1,0 +1,63 @@
+# Pre-commit hooks for xppu-frost
+# See https://pre-commit.com for more information
+
+repos:
+  # General file checks
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0
+  hooks:
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  # - id: check-yaml
+  #   args: [--allow-multiple-documents]
+  - id: check-added-large-files
+    args: [--maxkb=500]
+  - id: check-merge-conflict
+  - id: check-case-conflict
+  - id: mixed-line-ending
+    args: [--fix=lf]
+  - id: check-executables-have-shebangs
+  - id: check-shebang-scripts-are-executable
+
+  # Shell script linting
+- repo: https://github.com/shellcheck-py/shellcheck-py
+  rev: v0.11.0.1
+  hooks:
+  - id: shellcheck
+    args: [--severity=warning]
+
+  # Markdown formatting
+- repo: https://github.com/executablebooks/mdformat
+  rev: 0.7.22
+  hooks:
+  - id: mdformat
+    additional_dependencies:
+    - mdformat-gfm
+    - mdformat-tables
+
+  # YAML formatting
+- repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+  rev: v2.15.0
+  hooks:
+  - id: pretty-format-yaml
+    args: [--autofix, --indent, '2']
+
+  # Check for common spelling mistakes
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.2.6
+  hooks:
+  - id: codespell
+    args: ['--ignore-words-list=crate,nd,ser,te', '--skip=*.json,*.lock,esp-idf/**,src-gen/**,build/**']
+
+# Global file exclusions
+exclude: |
+  (?x)^(
+    frost/.*|
+    src-gen/.*|
+    build/.*|
+    \.git/.*|
+    .*\.elf$|
+    .*\.bin$|
+    .*\.o$|
+    .*\.a$
+  )$
