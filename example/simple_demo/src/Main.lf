@@ -1,6 +1,7 @@
 target Python{
-    fast: true,     # Set to false to enable real-time execution
-    timeout: 180 s, # Maximum logical execution time, comment out for no limit
+    fast: true,             # Set to false to enable real-time execution
+    timeout: 180 s,         # Maximum logical execution time, comment out for no limit
+    single-threaded: false, # Enable multithreading
 }
 
 import XPPU from "../../../src/XPPU.lf"
@@ -19,14 +20,18 @@ from shape_utils import set_wp_coordinates_to
 from machine_data_model.tracing import TraceLevel, clear_traces
 
 # Scheduling imports
-from frost_planner.core.base import TaskStatus, Job
+from frost_planner.core.base import TaskStatus, Job, SchedulingInstance
 from frost_planner.generator.instance_generator import load_instance_from_json
-from frost_planner.solver.genetic_solver import GeneticAlgorithmSolver
+from frost_planner.solver.dummy_solver import DummySolver
 from frost_planner.executor.dynamic_executor import DynamicExecutor
 from frost_planner.visualization.instance_dot_exporter import (
     export_instance_to_dot,
     render_dot_to_file,
 )
+
+# Kafka
+import asyncio
+from aiokafka import AIOKafkaProducer
 
 logger = logging.getLogger("sc14")
 logger.setLevel(logging.INFO)
@@ -36,9 +41,106 @@ crane_dpos={
     CranePos.POS_ST:0,
     CranePos.POS_ST:2*np.pi
 }
+
+stack_buffer = [
+    SteelMaterial(id=str(uuid.uuid4())),
+    PlasticMaterial(id=str(uuid.uuid4())),
+    SteelMaterial(id=str(uuid.uuid4()))
+]
 =}
 
 reactor KafkaProducer extends FrostReactor {
+    preamble{=
+        def run_asyncio_loop(
+            self,
+            shutdown_evt: asyncio.Event
+            ):
+
+            async def wait_for_event():
+                '''Wait for the shutdown event to be set.
+                '''
+                self.loop = asyncio.get_running_loop()
+                await asyncio.wait_for(shutdown_evt.wait(), None)
+            asyncio.run(wait_for_event())
+
+        async def start_kafka_producer(
+            self,
+            kafka_bootstrap_servers: str,
+            kafka_client_user: str,
+            kafka_client_password: str,
+            kafka_security_protocol: str,
+            kafka_sasl_mechanism: str
+        ):
+            '''Start the Kafka producer.
+            Args:
+                kafka_bootstrap_servers (str): The Kafka bootstrap servers.
+                kafka_client_user (str): The Kafka client user.
+                kafka_client_password (str): The Kafka client password.
+                kafka_security_protocol (str): The Kafka security protocol.
+                kafka_sasl_mechanism (str): The Kafka SASL mechanism.
+            '''
+            self.kafka_producer = AIOKafkaProducer(
+                bootstrap_servers=kafka_bootstrap_servers,
+                security_protocol=kafka_security_protocol,
+                sasl_mechanism=kafka_sasl_mechanism,
+                sasl_plain_username=kafka_client_user,
+                sasl_plain_password=kafka_client_password
+            )
+            await self.kafka_producer.start()
+            self.logger.debug(f"Kafka producer started with bootstrap servers: {kafka_bootstrap_servers}, user: {kafka_client_user}, security protocol: {kafka_security_protocol}, SASL mechanism: {kafka_sasl_mechanism}")
+            return True
+
+        async def stop_kafka_producer(self):
+            '''Stop the Kafka producer.
+            Args:
+                ice_proxy (ReactorBase): The ICEProxy reactor instance.
+            '''
+            if self.kafka_producer is not None:
+                await self.kafka_producer.stop()
+                self.kafka_producer = None
+                self.logger.debug("Kafka producer stopped")
+
+        async def send_message_to_kafka(
+            self,
+            topic: str,
+            message: str
+        ):
+            '''Send a message to the specified Kafka topic.
+            Args:
+                topic (str): The Kafka topic to send the message to.
+                message (str): The message to send.
+            '''
+            result = await self.kafka_producer.send_and_wait(topic, message.encode("utf-8"))
+            return result
+    =}
+
+    reaction (startup) {=
+        # TODO: Load from env or config
+        kafka_bootstrap_servers = "kafka:9092"
+
+        self.shutdown_evt = asyncio.Event()
+        self.thread = threading.Thread(
+            target=self.run_asyncio_loop,
+            daemon=True,
+            kwargs={
+                "shutdown_evt": self.shutdown_evt,
+            }
+        )
+        self.thread.start()
+
+        time.sleep(0.1)  # Give some time for the thread to start
+
+        asyncio.run_coroutine_threadsafe(
+            self.start_kafka_producer(
+                kafka_bootstrap_servers,
+                kafka_client_user,
+                kafka_client_password,
+                kafka_security_protocol,
+                kafka_sasl_mechanism
+            ),
+            self.loop
+        ).result()  # Wait for the producer to start
+    =}
 
     reaction(connected_to_bus) -> channel_out {=
         msgs = [
@@ -58,7 +160,16 @@ reactor KafkaProducer extends FrostReactor {
             if message.header.msg_name != VariableMsgName.UPDATE:
                 continue
 
-            self.logger.info(f"KafkaProducer: Received variable update message: {message}")
+            self.logger.debug(f"KafkaProducer: Received variable update message: {message}")
+            result = asyncio.run_coroutine_threadsafe(
+                self.send_message_to_kafka(
+                    topic,
+                    str(metric)
+                ),
+                self.loop
+            ).result()  # Wait for the message to be sent
+            if not result:
+                self.logger.error(f"KafkaProducer: Failed to send message to Kafka topic {topic}: {metric}")
     =}
 
 
@@ -69,7 +180,7 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
     input stack_wp_at_pickup
 
     state scheduling_instance = _scheduling_instance
-    state scheduling_interval = _scheduling_interval # in seconds
+    state scheduling_interval = _scheduling_interval # in s
     state recipe_template = "undefined"
     state _executor
     state _active_tasks = {={}=}
@@ -80,9 +191,11 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 
     reaction(startup) {=
         self.scheduling_instance = load_instance_from_json(self.scheduling_instance)
-        self._executor = DynamicExecutor(GeneticAlgorithmSolver(instance=self.scheduling_instance))
+        self._executor = DynamicExecutor(DummySolver(instance=self.scheduling_instance))
 
-
+        with open(self.recipe_template, "r") as f:
+            self.recipe_template = Job.model_validate_json(f.read())
+        self.logger.info(f"Loaded recipe template job: {self.recipe_template}")
     =}
 
     method create_method_request(t, method_path, args, kwargs){=
@@ -107,76 +220,83 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
         self.send_stack_wp_request(channel_out)
     =}
 
-    # TODO: revise
     reaction(is_stack_empty, stack_wp_at_pickup) {=
         if is_stack_empty.is_present:
             self.logger.info("XPPU stack is empty. Stopping requesting workpieces.")
             self.request_wp = False
 
-        if stack_wp_at_pickup.is_present and self.request_wp:
-            # TODO: Add a new Job/Task to the scheduling instance for the received workpiece
-            pass
+        if stack_wp_at_pickup.is_present:
+            # Add a new Job to the scheduler for processing the workpiece
+            recipe = self.recipe_template.model_copy(deep=True)
+            current_instance = self._executor.solver.instance
+            self._executor.solver = DummySolver(instance= SchedulingInstance(
+                jobs=current_instance.jobs + [recipe],
+                machines=current_instance.machines,
+                travel_times=current_instance.travel_times,
+            ))
+    =}
 
-        # TODO: think about when to request the next workpiece. Index based? Only after the previous task is completed?
-        # self.send_stack_wp_request(channel_out)
+    // @label update_schedule
+    reaction(update_schedule) -> update_schedule, start_tasks{=
+        executor = self._executor
+        logical_time = self._get_current_logical_time_sec()
+        self.logger.debug(f"Scheduling at logical time {logical_time} sec")
+        executor.update_task_status()
+        # TODO: Frost planner should support starting from logical time different than 0
+        schedule = executor.update_schedule(start_time=0)
+
+        # get the tasks that can be started now
+        next_tasks = executor.next_ready_tasks()
+        if next_tasks:
+            start_tasks.schedule(0, next_tasks)
+
+        scheduling_interval = SECS(self.scheduling_interval)
+        self.logger.debug(f"Scheduling next task in {scheduling_interval} s...")
+        update_schedule.schedule(scheduling_interval)
+    =}
+
+    // @label run_tasks
+    reaction(start_tasks) {=
+        self.logger.info(f"Starting tasks: {start_tasks.value}")
+
+        # Add here the request of the new workpiece if needed
+
+        for task, machine in start_tasks.value:
+            machine = machine.name
+            task_name = task.task.name
+            self.logger.info(f"Starting task {task_name} on machine {machine}")
+            task.start_time = self._get_current_logical_time_sec()
+            self._executor.task_started(task)
+
+            msg = self.create_method_request(self.data_model.name, f"/XPPUScheduler/Methods/{task_name}", args=[machine, f"/Machine/{task_name}"], kwargs={})
+            self._active_tasks[msg.correlation_id] = task
+            self.protocol_mng.handle_request(msg)
 
     =}
 
-    // // @label update_schedule
-    // reaction(update_schedule) -> update_schedule, start_tasks{=
-    //     executor = self._executor
-    //     logical_time = self._get_current_logical_time_sec()
-    //     self.logger.debug(f"Scheduling at logical time {logical_time} sec")
-    //     executor.update_task_status()
-    //     schedule = executor.update_schedule(start_time=logical_time)
+    reaction(response_messages) -> channel_out{=
+        for bank_index, message in response_messages.value:
 
-    //     # get the tasks that can be started now
-    //     next_tasks = executor.next_ready_tasks()
-    //     start_tasks.schedule(0, next_tasks)
+            if message.correlation_id not in self._active_tasks:
+                continue
 
-    //     scheduling_interval = SECS(self.scheduling_interval)
-    //     self.logger.debug(f"Scheduling next task in {scheduling_interval}...")
-    //     update_schedule.schedule(scheduling_interval)
-    // =}
+            if message.header.msg_name != MethodMsgName.COMPLETED:
+                continue
 
-    // // @label run_tasks
-    // reaction(start_tasks) {=
-    //     self.logger.debug(f"Starting tasks: {start_tasks.value}")
+            task = self._active_tasks.pop(message.correlation_id)
+            task.end_time = self._get_current_logical_time_sec()
+            self._executor.task_completed(task)
+            self.logger.warning(f"Task {task.task.name} completed on machine {task.machine.name}")
 
-    //     for task, machine in start_tasks.value:
-    //         machine = machine.name
-    //         task_name = task.task.name
-    //         self.logger.info(f"Starting task {task_name} on machine {machine}")
-    //         task.start_time = self._get_current_logical_time_sec()
-    //         self._executor.task_started(task)
-
-    //         msg = self.create_method_request(self.data_model.name, f"/Scheduler/StartTask", args=[machine, f"/Machine/{task_name}"], kwargs={})
-    //         self._active_tasks[msg.correlation_id] = task
-    //         self.protocol_mng.handle_request(msg)
-
-    // =}
-
-    // reaction(response_messages) {=
-    //     for bank_index, message in response_messages.value:
-
-    //         if message.correlation_id not in self._active_tasks:
-    //             continue
-
-    //         if message.header.msg_name != MethodMsgName.COMPLETED:
-    //             continue
-
-    //         task = self._active_tasks.pop(message.correlation_id)
-    //         task.end_time = self._get_current_logical_time_sec()
-    //         self._executor.task_completed(task)
-    //         self.logger.warning(f"Task {task.task.name} completed on machine {task.machine.name}")
-
-    // =}
+            if task.task.name == "PickStackStampToLSC" and self.request_wp:
+                self.send_stack_wp_request(channel_out)
+    =}
 
 }
 main reactor {
     state received_wp = []
 
-    xppu = new XPPU(name="xppu")
+    xppu = new XPPU(name="xppu", stack_buffer={= deepcopy(stack_buffer)=})
     bus = new FrostBus(name="frost_bus", width=3)
     xppu_scheduler = new XPPUScheduler(name="xppu_scheduler", update_interval=100 ms)
     kafka_producer = new KafkaProducer(name="kafka_producer")

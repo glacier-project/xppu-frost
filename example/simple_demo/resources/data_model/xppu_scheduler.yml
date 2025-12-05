@@ -12,17 +12,9 @@ root: !!FolderNode
     description: ''
     children:
     - !!CompositeMethodNode
-      name: RunFullDemo
+      name: PickStackStampToLSC
       description: ''
       cfg:
-      - !!CallRemoteMethodNode
-        method: /xPPU/Stack/Methods/RequestWp
-        remote_id: xppu
-      - !!WaitRemoteEventNode
-        variable: /xPPU/Stack/Variables/WpAvailable
-        remote_id: xppu
-        rhs: true
-        operator: ==
       - !!CallRemoteMethodNode
         method: /xPPU/Crane/Methods/RotateCrane
         remote_id: xppu
@@ -91,6 +83,13 @@ root: !!FolderNode
         remote_id: xppu
         rhs: false
         operator: ==
+      returns:
+      - !!BooleanVariableNode
+        name: Result
+    - !!CompositeMethodNode
+      name: LSCToRampMid
+      description: ''
+      cfg:
       - !!ReadRemoteVariableNode
         variable: /xPPU/LSC/Variables/RampMidWpCount
         remote_id: xppu

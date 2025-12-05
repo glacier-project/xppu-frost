@@ -4,18 +4,18 @@
   "tasks": [
     {
       "id": "efd468fd-67c9-4e7a-a683-cd3c951547ce",
-      "name": "PickStack_Stamp_ToLSC",
+      "name": "PickStackStampToLSC",
       "processing_time": 25,
       "requires": [
         "stack",
         "stamp",
-        "lsc"
+        "crane"
       ],
       "priority": 1
     },
     {
-      "id": "efd468fd-67c9-4e7a-a683-cd3c951547ce",
-      "name": "LSC_ToRampMid",
+      "id": "7cc1b280-214a-42cc-a660-151b19dc714f",
+      "name": "LSCToRampMid",
       "processing_time": 5,
       "dependencies": [
         "efd468fd-67c9-4e7a-a683-cd3c951547ce"

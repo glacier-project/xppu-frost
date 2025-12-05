@@ -1,0 +1,47 @@
+services:
+  kafka:
+    image: apache/kafka:latest
+    ports:
+    - 9092:9092
+    hostname: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    healthcheck:
+      test:
+      - CMD
+      - kafka-broker-api-versions.sh
+      - --bootstrap-server
+      - localhost:9092
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+    - net
+
+  xppu_frost:
+    image: xppu-frost-demo:latest
+    build:
+      context: ../..
+      dockerfile: example/simple_demo/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+    - net
+
+networks:
+  net:
+    external: false
+    name: net

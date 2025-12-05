@@ -177,19 +177,20 @@ root: !!FolderNode
       name: Variables
       description:
       children:
-      # - !!BooleanVariableNode
-      #   name: WpAtRampStart
-      #   description:
-      #   initial_value: false
-      # - !!BooleanVariableNode
-      #   name: WpAtRampMid
-      #   description:
-      #   initial_value: false
-      # - !!BooleanVariableNode
-      #   name: WpAtRampEnd
-      #   description:
-      #   initial_value: false
-      - !!NumericalVariableNode name: ProductType
+      - !!BooleanVariableNode
+        name: WpAtRampStart
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: WpAtRampMid
+        description:
+        initial_value: false
+      - !!BooleanVariableNode
+        name: WpAtRampEnd
+        description:
+        initial_value: false
+      - !!NumericalVariableNode
+        name: ProductType
         description:
         initial_value: 0
       - !!BooleanVariableNode
