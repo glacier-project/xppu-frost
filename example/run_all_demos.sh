@@ -30,19 +30,22 @@ for demo in "${DEMOS[@]}"; do
     echo "Running demo: $demo"
     echo "========================================"
 
-    if [[ ! -f "$demo_dir/run.sh" ]]; then
+    putd "$demo_dir"
+
+    if [[ ! -f "run.sh" ]]; then
         echo "ERROR: $demo_dir/run.sh not found"
         FAILED_DEMOS+=("$demo")
         continue
     fi
 
-    if "$demo_dir/run.sh"; then
+    if "./run.sh"; then
         echo "✓ Demo '$demo' passed"
         PASSED_DEMOS+=("$demo")
     else
         echo "✗ Demo '$demo' failed"
         FAILED_DEMOS+=("$demo")
     fi
+    popd
     echo ""
 done
 
