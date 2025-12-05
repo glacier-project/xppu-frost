@@ -32,12 +32,15 @@ fi
 
 echo "Running xppu_frost..."
 
-# Run the application in fast mode (override docker-compose command)
-if docker compose run --rm xppu_frost sh -c "python src-gen/Main/Main.py -f true"; then
+# Run the application in fast mode (suppress output on success)
+output=$(docker compose run --rm xppu_frost sh -c "python src-gen/Main/Main.py -f true" 2>&1) && exit_code=0 || exit_code=$?
+
+if [[ $exit_code -eq 0 ]]; then
     echo "Demo ran successfully"
     exit 0
 else
     echo "Demo failed"
+    echo "$output"
     docker compose logs xppu_frost
     exit 1
 fi
