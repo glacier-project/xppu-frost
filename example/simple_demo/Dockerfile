@@ -13,7 +13,7 @@ COPY src /opt/xppu-frost/example/simple_demo/src
 RUN lfc src/Main.lf
 
 # Runtime image
-FROM python:3.13-alpine3.21
+FROM python:3.13-slim AS runtime
 
 COPY --from=builder /venv /venv
 COPY --from=builder /opt/xppu-frost/example/simple_demo/src-gen /opt/xppu-frost/example/simple_demo/src-gen

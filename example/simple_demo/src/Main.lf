@@ -2,6 +2,7 @@ target Python{
     fast: true,             # Set to false to enable real-time execution
     timeout: 180 s,         # Maximum logical execution time, comment out for no limit
     single-threaded: false, # Enable multithreading
+    // logging: DEBUG,        # Enable logging
 }
 
 import XPPU from "../../../src/XPPU.lf"
@@ -70,28 +71,16 @@ reactor KafkaProducer extends FrostReactor {
         async def start_kafka_producer(
             self,
             kafka_bootstrap_servers: str,
-            # kafka_client_user: str,
-            # kafka_client_password: str,
-            # kafka_security_protocol: str,
-            # kafka_sasl_mechanism: str
         ):
             '''Start the Kafka producer.
             Args:
                 kafka_bootstrap_servers (str): The Kafka bootstrap servers.
-                kafka_client_user (str): The Kafka client user.
-                kafka_client_password (str): The Kafka client password.
-                kafka_security_protocol (str): The Kafka security protocol.
-                kafka_sasl_mechanism (str): The Kafka SASL mechanism.
             '''
             self.kafka_producer = AIOKafkaProducer(
-                bootstrap_servers=kafka_bootstrap_servers,
-                # security_protocol=kafka_security_protocol,
-                # sasl_mechanism=kafka_sasl_mechanism,
-                # sasl_plain_username=kafka_client_user,
-                # sasl_plain_password=kafka_client_password
+                bootstrap_servers=kafka_bootstrap_servers
             )
             await self.kafka_producer.start()
-            # self.logger.debug(f"Kafka producer started with bootstrap servers: {kafka_bootstrap_servers}, user: {kafka_client_user}, security protocol: {kafka_security_protocol}, SASL mechanism: {kafka_sasl_mechanism}")
+            self.logger.debug(f"Kafka producer started with bootstrap servers: {kafka_bootstrap_servers}")
             return True
 
         async def stop_kafka_producer(self):
@@ -143,6 +132,7 @@ reactor KafkaProducer extends FrostReactor {
             ),
             self.loop
         ).result()  # Wait for the producer to start
+        self.logger.info("KafkaProducer reactor initialized")
     =}
 
     // @label subscribe_to_xppu_vars
