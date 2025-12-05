@@ -1,6 +1,8 @@
 # xPPU-Frost
 
-A digital twin implementation of the extended Pick and Place Unit (xPPU) using the [Frost](https://github.com/glacier-project/frost) framework and [Lingua Franca](https://www.lf-lang.org/).
+A digital twin implementation of the  Extended Pick&Place Unit (xPPU) using the [Frost](https://github.com/glacier-project/frost) framework and [Lingua Franca](https://www.lf-lang.org/).
+
+![xPPU Diagram](docs/images/xppu.png)
 
 ## Overview
 
@@ -22,6 +24,8 @@ The xPPU consists of the following main modules:
 | **Crane**      | Rotary crane for workpiece transport with pneumatic gripper    |
 | **Stamp**      | Stamping station for workpiece processing                      |
 | **LSConveyor** | Linear sorting conveyor with position sensors                  |
+
+More details about each component can be found in the `src/` directory.
 
 ## Prerequisites
 
@@ -167,6 +171,7 @@ docker run --rm xppu-frost-demo:latest
 - [Frost Framework](https://github.com/esd-univr/frost)
 - [Machine Data Model](https://github.com/esd-univr/machine-data-model)
 - [Glacier Project](https://github.com/esd-univr/glacier)
+- [xPPU](https://www.mec.ed.tum.de/ais/forschung/demonstratoren/ppu/)
 
 ## Contributing
 
