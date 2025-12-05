@@ -66,15 +66,15 @@ The `-f false` flag enables real-time execution (disables fast mode).
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `localhost:9093` (host) / `kafka:9092` (container) |
-| `FROST_CONFIG` | Path to Frost config file | `resources/frost_config.yml` |
+| Variable                  | Description               | Default                                            |
+| ------------------------- | ------------------------- | -------------------------------------------------- |
+| `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address      | `localhost:9093` (host) / `kafka:9092` (container) |
+| `FROST_CONFIG`            | Path to Frost config file | `resources/frost_config.yml`                       |
 
 ### Kafka Topics
 
-| Topic | Description |
-|-------|-------------|
+| Topic       | Description                         |
+| ----------- | ----------------------------------- |
 | `xppu_data` | xPPU variable updates (JSON format) |
 
 ## Project Structure

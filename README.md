@@ -1,6 +1,6 @@
 # xPPU-Frost
 
-A digital twin implementation of the  Extended Pick&Place Unit (xPPU) using the [Frost](https://github.com/glacier-project/frost) framework and [Lingua Franca](https://www.lf-lang.org/).
+A digital twin implementation of the Extended Pick&Place Unit (xPPU) using the [Frost](https://github.com/glacier-project/frost) framework and [Lingua Franca](https://www.lf-lang.org/).
 
 ![xPPU Diagram](docs/images/xppu.png)
 
