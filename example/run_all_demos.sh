@@ -30,7 +30,7 @@ for demo in "${DEMOS[@]}"; do
     echo "Running demo: $demo"
     echo "========================================"
 
-    putd "$demo_dir"
+    pushd "$demo_dir"
 
     if [[ ! -f "run.sh" ]]; then
         echo "ERROR: $demo_dir/run.sh not found"
