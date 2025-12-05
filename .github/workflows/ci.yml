@@ -18,6 +18,12 @@ jobs:
       with:
         python-version: '3.13'
 
+    - name: Cache pre-commit
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pre-commit
+        key: ${{ runner.os }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
     - name: Install pre-commit
       run: pip install pre-commit
 
@@ -32,26 +38,14 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Setup Lingua Franca
+      uses: ./.github/actions/setup-lfc
+
+    - name: Setup Python environment
+      uses: ./.github/actions/setup-python
       with:
         python-version: '3.13'
-
-    - name: Set up Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: '17'
-
-    - name: Install Lingua Franca compiler
-      run: |
-        curl -Ls https://install.lf-lang.org | bash -s cli
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        requirements-file: requirements.txt
 
     - name: Run tests
       working-directory: test
@@ -79,3 +73,22 @@ jobs:
       with:
         targets: simple_demo
         load: true
+
+  test-demos:
+    name: Test Demos
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker images
+      uses: docker/bake-action@v6
+      with:
+        load: true
+
+    - name: Run all demos
+      run: ./example/run_all_demos.sh --timeout 30

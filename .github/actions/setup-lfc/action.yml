@@ -1,0 +1,33 @@
+name: Setup Lingua Franca
+description: Setup Lingua Franca compiler with caching
+
+inputs:
+  java-version:
+    description: Java version to use
+    required: false
+    default: '17'
+
+runs:
+  using: composite
+  steps:
+  - name: Set up Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: ${{ inputs.java-version }}
+
+  - name: Cache Lingua Franca compiler
+    id: cache-lfc
+    uses: actions/cache@v4
+    with:
+      path: ~/.local/bin/lfc
+      key: ${{ runner.os }}-lfc-latest
+
+  - name: Install Lingua Franca compiler
+    if: steps.cache-lfc.outputs.cache-hit != 'true'
+    shell: bash
+    run: curl -Ls https://install.lf-lang.org | bash -s cli
+
+  - name: Add lfc to PATH
+    shell: bash
+    run: echo "$HOME/.local/bin" >> $GITHUB_PATH
