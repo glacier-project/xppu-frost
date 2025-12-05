@@ -5,7 +5,7 @@ inputs:
   java-version:
     description: Java version to use
     required: false
-    default: '17'
+    default: '21'
 
 runs:
   using: composite
@@ -20,7 +20,9 @@ runs:
     id: cache-lfc
     uses: actions/cache@v4
     with:
-      path: ~/.local/bin/lfc
+      path: |
+        ~/.local/bin/lfc
+        ~/.local/share/lf-lang
       key: ${{ runner.os }}-lfc-latest
 
   - name: Install Lingua Franca compiler
