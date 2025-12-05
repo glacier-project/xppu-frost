@@ -30,7 +30,11 @@ from frost_planner.visualization.instance_dot_exporter import (
 )
 
 # Kafka
+import json
+import time
+import threading
 import asyncio
+from dataclasses import asdict
 from aiokafka import AIOKafkaProducer
 
 logger = logging.getLogger("sc14")
@@ -66,10 +70,10 @@ reactor KafkaProducer extends FrostReactor {
         async def start_kafka_producer(
             self,
             kafka_bootstrap_servers: str,
-            kafka_client_user: str,
-            kafka_client_password: str,
-            kafka_security_protocol: str,
-            kafka_sasl_mechanism: str
+            # kafka_client_user: str,
+            # kafka_client_password: str,
+            # kafka_security_protocol: str,
+            # kafka_sasl_mechanism: str
         ):
             '''Start the Kafka producer.
             Args:
@@ -81,13 +85,13 @@ reactor KafkaProducer extends FrostReactor {
             '''
             self.kafka_producer = AIOKafkaProducer(
                 bootstrap_servers=kafka_bootstrap_servers,
-                security_protocol=kafka_security_protocol,
-                sasl_mechanism=kafka_sasl_mechanism,
-                sasl_plain_username=kafka_client_user,
-                sasl_plain_password=kafka_client_password
+                # security_protocol=kafka_security_protocol,
+                # sasl_mechanism=kafka_sasl_mechanism,
+                # sasl_plain_username=kafka_client_user,
+                # sasl_plain_password=kafka_client_password
             )
             await self.kafka_producer.start()
-            self.logger.debug(f"Kafka producer started with bootstrap servers: {kafka_bootstrap_servers}, user: {kafka_client_user}, security protocol: {kafka_security_protocol}, SASL mechanism: {kafka_sasl_mechanism}")
+            # self.logger.debug(f"Kafka producer started with bootstrap servers: {kafka_bootstrap_servers}, user: {kafka_client_user}, security protocol: {kafka_security_protocol}, SASL mechanism: {kafka_sasl_mechanism}")
             return True
 
         async def stop_kafka_producer(self):
@@ -114,9 +118,12 @@ reactor KafkaProducer extends FrostReactor {
             return result
     =}
 
+    state kafka_topic = "xppu_data"
+
+    // @label setup_kafka_producer
     reaction (startup) {=
-        # TODO: Load from env or config
-        kafka_bootstrap_servers = "kafka:9092"
+        # Use port 9093 for host connections, 9092 for container-to-container
+        kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9093")
 
         self.shutdown_evt = asyncio.Event()
         self.thread = threading.Thread(
@@ -132,16 +139,13 @@ reactor KafkaProducer extends FrostReactor {
 
         asyncio.run_coroutine_threadsafe(
             self.start_kafka_producer(
-                kafka_bootstrap_servers,
-                kafka_client_user,
-                kafka_client_password,
-                kafka_security_protocol,
-                kafka_sasl_mechanism
+                kafka_bootstrap_servers
             ),
             self.loop
         ).result()  # Wait for the producer to start
     =}
 
+    // @label subscribe_to_xppu_vars
     reaction(connected_to_bus) -> channel_out {=
         msgs = [
             self.message_builder.build_subscribe_variable_message(
@@ -154,6 +158,7 @@ reactor KafkaProducer extends FrostReactor {
         self._set_channel_out_port(msgs, channel_out)
     =}
 
+    // @label handle_xppu_var_updates
     reaction(response_messages) {=
         for bank_index, message in response_messages.value:
 
@@ -163,8 +168,9 @@ reactor KafkaProducer extends FrostReactor {
             self.logger.debug(f"KafkaProducer: Received variable update message: {message}")
             result = asyncio.run_coroutine_threadsafe(
                 self.send_message_to_kafka(
-                    topic,
-                    str(metric)
+                    self.kafka_topic,
+                    # Serialize the dataclass to JSON
+                    json.dumps(asdict(message), default=str)
                 ),
                 self.loop
             ).result()  # Wait for the message to be sent
@@ -172,7 +178,25 @@ reactor KafkaProducer extends FrostReactor {
                 self.logger.error(f"KafkaProducer: Failed to send message to Kafka topic {topic}: {metric}")
     =}
 
+    // @label _tear_down_kafka_producer
+    reaction(shutdown){=
+        '''Tear down the KafkaProducer reactor and close the Kafka producer.'''
+        self.logger.info("Shutting down KafkaProducer reactor")
 
+        # Close the Kafka producer first (while loop is still running)
+        asyncio.run_coroutine_threadsafe(self.stop_kafka_producer(), self.loop).result()
+
+        # Signal the asyncio loop thread to stop
+        self.shutdown_evt.set()
+
+        if self.thread is not None:
+            self.logger.info("Waiting for the asyncio loop thread to finish")
+            self.thread.join(timeout=2.0)
+            if self.thread.is_alive():
+                self.logger.warning("Asyncio loop thread did not finish in time")
+            else:
+                self.logger.info("Asyncio loop thread finished")
+    =}
 }
 
 reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) extends FrostMachine{
@@ -286,7 +310,7 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
             task = self._active_tasks.pop(message.correlation_id)
             task.end_time = self._get_current_logical_time_sec()
             self._executor.task_completed(task)
-            self.logger.warning(f"Task {task.task.name} completed on machine {task.machine.name}")
+            self.logger.info(f"Task {task.task.name} completed on machine {task.machine.name}")
 
             if task.task.name == "PickStackStampToLSC" and self.request_wp:
                 self.send_stack_wp_request(channel_out)
@@ -294,8 +318,6 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 
 }
 main reactor {
-    state received_wp = []
-
     xppu = new XPPU(name="xppu", stack_buffer={= deepcopy(stack_buffer)=})
     bus = new FrostBus(name="frost_bus", width=3)
     xppu_scheduler = new XPPUScheduler(name="xppu_scheduler", update_interval=100 ms)

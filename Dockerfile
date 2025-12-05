@@ -16,6 +16,7 @@ ENV PATH="/venv/bin:$PATH"
 # Copy frost framework and xppu sources
 COPY frost /opt/xppu-frost/frost
 COPY src /opt/xppu-frost/src
+COPY resources /opt/xppu-frost/resources
 COPY requirements.txt /opt/xppu-frost/requirements.txt
 
 # Install dependencies

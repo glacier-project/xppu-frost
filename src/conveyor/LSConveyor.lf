@@ -49,7 +49,7 @@ reactor LSConveyor extends Conveyor{
     output mc_pac_state
 
     mc_ramp_start = new MonostableCylinder(
-        name="mc_ramp_start",
+        name={=self.name + ".mc_ramp_start"=},
         retraction_speed=223.684, # m/s t= 0.38ms
         extension_speed=472.222, # m/s t= 0.18ms
         extension_length=0.085, # m
@@ -57,7 +57,7 @@ reactor LSConveyor extends Conveyor{
     )
     mc_ramp_start.s -> mc_ramp_start_state
     mc_pac = new MonostableCylinder(
-        name="mc_pac",
+        name={=self.name + ".mc_pac"=},
         retraction_speed=223.684, # m/s t= 0.38ms
         extension_speed=472.222, # m/s t= 0.18ms
         extension_length=0.085, # m
@@ -65,7 +65,7 @@ reactor LSConveyor extends Conveyor{
     )
     mc_pac.s -> mc_pac_state
     mc_ramp_mid = new MonostableCylinder(
-        name="mc_ramp_mid",
+        name={=self.name + ".mc_ramp_mid"=},
         retraction_speed=274.194, # m/s t= 0.38ms
         extension_speed=531.25, # m/s t= 0.18ms
         extension_length=0.085, # m

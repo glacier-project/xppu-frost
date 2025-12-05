@@ -315,8 +315,9 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
             self.crane_product_type.value = 1 if wp is not None else 0
 
         if crane.angle.is_present:
-            # self.logger.debug(f"Updating crane angle to {crane.angle.value}")
-            self.crane_angle.value = crane.angle.value
+            # Convert angle to degrees
+            crane_angle = crane.angle.value * (180 / np.pi)
+            self.crane_angle.value = crane_angle
     =}
 
     method set_mc_state_variables(mc_state, mc_retracted, mc_extended){=

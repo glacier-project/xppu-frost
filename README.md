@@ -1,44 +1,45 @@
-# Frost Template
+# xPPU-Frost
 
-A template repository for quickly starting new [Frost](https://github.com/esd-univr/frost) projects.
+A digital twin implementation of the extended Pick and Place Unit (xPPU) using the [Frost](https://github.com/glacier-project/frost) framework and [Lingua Franca](https://www.lf-lang.org/).
 
 ## Overview
 
-This template provides a minimal, ready-to-use starting point for developing Cyber-Physical Production System (CPPS) virtual platforms using the Frost framework. It includes the essential directory structure, configuration files, and a basic main reactor setup that you can extend for your specific use case.
+This repository contains a virtual platform for simulating and testing the xPPU, a Cyber-Physical Production System (CPPS) used as a benchmark in Industry 4.0 research. The implementation leverages the Frost framework to provide:
 
-## About Frost
+- **Deterministic execution** of the xPPU control logic
+- **Digital Twin capabilities** for virtual testing and validation
+- **Modular architecture** with reusable components (Stack, Crane, Stamp, Conveyor)
+- **Data model-driven interface** for flexible machine configuration
+- **Kafka integration** for real-time data streaming
 
-Frost is an open-source framework for the development, testing, and deployment of software applications for controlling and supervising CPPSs. Built on top of the [Lingua Franca](https://www.lf-lang.org/) framework, Frost ensures deterministic execution and provides:
+## xPPU Components
 
-- **Simplified interface** for machine control software development
-- **Digital Twin capabilities** for virtual testing before deployment
-- **Extensible components** (FrostMachine, FrostBus, FrostReactor, etc.)
-- **Data model-driven architecture** for defining flexible machine interfaces
+The xPPU consists of the following main modules:
 
-Frost is part of the [Glacier](https://github.com/esd-univr/glacier) project.
+| Component      | Description                                                    |
+| -------------- | -------------------------------------------------------------- |
+| **Stack**      | Workpiece storage and dispensing unit with monostable cylinder |
+| **Crane**      | Rotary crane for workpiece transport with pneumatic gripper    |
+| **Stamp**      | Stamping station for workpiece processing                      |
+| **LSConveyor** | Linear sorting conveyor with position sensors                  |
 
 ## Prerequisites
 
+- Python 3.12 or higher
 - [Lingua Franca](https://www.lf-lang.org/) compiler (`lfc`)
-- Python 3.11 or higher
-- [Frost framework](https://github.com/esd-univr/frost) (included as a submodule in this template)
+- CMake (for building)
+- Docker (optional, for containerized deployment)
 
 ## Getting Started
 
-### 1. Clone this template
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/esd-univr/frost-template.git your-project-name
-cd your-project-name
+git clone --recursive https://github.com/glacier-project/xppu-frost.git
+cd xppu-frost
 ```
 
-### 2. Initialize the Frost submodule
-
-```bash
-git submodule update --init --recursive
-```
-
-### 3. Install dependencies
+### 2. Install dependencies
 
 ```bash
 python3 -m venv .venv
@@ -46,182 +47,131 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-### 4. Configure your project
-
-Edit the configuration file at `resources/frost_config.yml` to customize:
-
-- Logging time precision
-- Logging level of each reactor
-- Reactor initial parameters
-- Data model paths
-
-See the [Configuration](#configuration) section below for detailed information.
-
-### 5. Customize your data model
-
-Edit or replace `resources/data_model/hello.yml` to define your machine's data model, including:
-
-- Variables (numerical, string, boolean, object)
-- Methods
-- Folder structure
-
-### 6. Implement your application
-
-Edit `src/Main.lf` to:
-
-- Import custom machine reactors
-- Instantiate your machines
-- Configure the FrostBus connections
-
-### 7. Build and run
-
-```bash
-lfc src/Main.lf
-./bin/Main
-```
-
 ## Project Structure
 
 ```
-frost-template/
+xppu-frost/
 ├── src/
-│   └── Main.lf              # Main reactor file - entry point
+│   ├── Main.lf                 # Main reactor entry point
+│   ├── XPPU.lf                 # xPPU composite reactor
+│   ├── common/                 # Shared components (MonostableCylinder, etc.)
+│   ├── stack/                  # Stack module
+│   ├── crane/                  # Crane module
+│   ├── stamp/                  # Stamp module
+│   ├── conveyor/               # Conveyor module
+│   └── python-lib/             # Python utilities
+├── example/
+│   ├── simple_demo/            # Simple demo with Kafka integration
+├── test/                       # Test suite
+│   ├── src/                    # Test reactors
+│   └── resources/              # Test configurations
 ├── resources/
-│   ├── frost_config.yml     # Frost configuration
-│   └── data_model/
-│       └── frost_bus.yml    # Bus data model
-│       └── hello.yml        # Hello data model
-├── frost/                   # Frost framework (submodule)
-│   ├── src/
-│   │   ├── lib/             # Frost library components
-│   │   └── python_lib/      # Python utilities
-│   └── benchmark/           # Example implementations
-└── README.md
+│   ├── frost_config.yml        # Frost configuration
+│   └── data_model/             # Data model definitions
+├── frost/                      # Frost framework (submodule)
+├── Dockerfile                  # Base Docker image
+└── docker-bake.hcl             # Docker Bake configuration
 ```
 
-## Example: Creating a Simple Machine
+## Running Examples
 
-Create a new file `src/MyMachine.lf`:
+### Simple Demo (with Kafka)
 
-```lf
-target Python
+The simple demo showcases the xPPU with Kafka integration for data streaming:
 
-import FrostMachine from "../frost/src/lib/FrostMachine.lf"
+```bash
+cd example/simple_demo
 
-reactor MyMachine extends FrostMachine {
-    state my_variable
+# Install dependencies
+python -m pip install -r requirements.txt
 
-    reaction(startup) {=
-        # Link state variables to data model nodes
-        self.my_variable = self.data_model.get_node("MyMachine/Status")
-        self.logger.info("MyMachine initialized")
-    =}
+# Start Kafka (using Docker Compose)
+docker compose up -d kafka
 
-    timer t(0 s, 1 s)
-    reaction(t) {=
-        # Implement your machine logic here
-        self.my_variable.value += 1
-        self.logger.info("Status updated: %d", self.my_variable.value)
-    =}
-}
+# Build and run the demo
+lfc src/Main.lf
+./bin/Main -f false  # -f false for real-time execution
 ```
 
-Then update `src/Main.lf` to instantiate it:
+To run entirely in Docker:
 
-```lf
-import MyMachine from "MyMachine.lf"
+```bash
+# Build all images
+docker buildx bake
 
-main reactor {
-    bus = new FrostBus(name="frost_bus", width=1)
-    machine = new MyMachine(
-        name="my_machine",
-        model_path="path/to/my_machine_model.yml"
-    )
+# Run the demo
+cd example/simple_demo
+docker compose up
+```
 
-    bus.channel_out -> machine.channel_in
-    machine.channel_out -> bus.channel_in after 0
-}
+## Running Tests
+
+```bash
+cd test
+
+# Run all tests
+make all
+
+# Run a specific test
+make test-TestStack
 ```
 
 ## Configuration
 
-Frost uses a YAML configuration file (`resources/frost_config.yml`) to manage reactor parameters and logging settings. The configuration follows a hierarchical structure that mirrors the reactor instantiation.
+### Frost Configuration
 
-### Global Settings
-
-```yaml
-time_precision: MSECS    # Time precision: NSECS, USECS, MSECS, SECS
-logging_level: INFO      # Global logging level: DEBUG, INFO, WARNING, ERROR
-```
-
-### Reactor Configuration
-
-Each reactor is configured under the `reactors` key using its **name** (the `name` parameter passed during instantiation):
+The `resources/frost_config.yml` file configures reactor parameters and logging:
 
 ```yaml
+time_precision: MSECS # Milliseconds precision in the logs
+logging_level: INFO # Global logging level
 reactors:
-  hello:                              # Matches: new Hello(name="hello")
-    logging_level: INFO               # Override global logging level
+  xppu:
+    logging_level: DEBUG # Override logging level for xPPU reactor
     parameters:
-      data_model_path: "resources/data_model/hello.yml"  # Path to data model
-    reactors:                         # Nested reactors (if any)
-      some_reactor:                  # Matches: new SomeReactor(name="hello.some_reactor")
-        logging_level: INFO
+      data_model_path: "resources/data_model/xppu.yml"
 ```
 
-### Key Concepts
+### Data Model
 
-1. **Name Matching**: The configuration keys must match the `name` parameter you provide when instantiating reactors in your `.lf` files.
+The xPPU data model is defined in YAML files under [`resources/data_model/`](resources/data_model/xppu.yml). It specifies:
 
-1. **Hierarchical Structure**: Nested reactors are configured under their parent's `reactors` section.
-
-1. **Parameter Passing**: The `parameters` section allows you to set initial values for reactor parameters, particularly:
-
-   - `data_model_path`: Path to the YAML data model file
-   - Any state variables defined in the reactor
-
-1. **Logging Levels**: Each reactor can have its own logging level, overriding the global setting. This is useful for debugging specific components without flooding logs.
+- Variables (state, sensors, actuators)
+- Methods (commands, operations)
+- Hierarchical folder structure
 
 ## Docker Support
 
-The template includes Docker support for containerized development and deployment.
+### Building Images
 
-### Building the Docker Image
+Using Docker Bake:
 
 ```bash
-docker build -t frost-app .
+# Build all images
+docker buildx bake
+
+# Build specific target
+docker buildx bake base
+docker buildx bake simple_demo
 ```
 
-The Dockerfile performs the following steps:
-
-1. Installs Lingua Franca compiler (`lfc`)
-1. Installs Python dependencies from `requirements.txt`
-1. Compiles the `src/Main.lf` file
-1. Creates a minimal runtime image with only the necessary components
-
-### Running the Container
+### Running in Docker
 
 ```bash
-docker run --rm frost-app
+docker run --rm xppu-frost-demo:latest
 ```
 
 ## Documentation
 
-For more detailed information about Frost and its components, please refer to the following resources:
-
 - [Lingua Franca Documentation](https://www.lf-lang.org/docs)
-- [Frost Repository](https://github.com/esd-univr/frost)
+- [Frost Framework](https://github.com/esd-univr/frost)
 - [Machine Data Model](https://github.com/esd-univr/machine-data-model)
 - [Glacier Project](https://github.com/esd-univr/glacier)
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! Please follow the [contribution guidelines](.github/copilot-instructions.md) for coding style and commit conventions.
 
 ## License
 
 See [LICENSE](LICENSE) file for details.
-
-## Support
-
-For questions and support, please open an issue in the repository.

@@ -10,6 +10,7 @@ repos:
   - id: end-of-file-fixer
   - id: check-yaml
     args: [--allow-multiple-documents, --unsafe]
+    exclude: docker-compose.yml
   - id: check-json
   - id: pretty-format-json
     args:
