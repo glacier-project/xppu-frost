@@ -42,6 +42,8 @@ This starts:
 In another terminal:
 
 ```bash
+source .venv/bin/activate
+cd example/simple_demo
 python test/consumer.py
 ```
 
