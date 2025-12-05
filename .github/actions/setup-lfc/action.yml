@@ -22,7 +22,9 @@ runs:
     with:
       path: |
         ~/.local/bin/lfc
-        ~/.local/share/lf-lang
+        ~/.local/bin/lfd
+        ~/.local/bin/lff
+        ~/.local/share/lingua-franca
       key: ${{ runner.os }}-lfc-latest
 
   - name: Install Lingua Franca compiler
@@ -33,3 +35,9 @@ runs:
   - name: Add lfc to PATH
     shell: bash
     run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+  - name: Verify lfc installation
+    shell: bash
+    run: |
+      export PATH="$HOME/.local/bin:$PATH"
+      lfc --version
