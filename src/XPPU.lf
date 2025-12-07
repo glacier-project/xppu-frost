@@ -134,14 +134,14 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
     state lsc_ramp_mid_wp_count
     state lsc_ramp_end_wp_count
 
-    stack = new Stack(name={= self.name + ".stack" =}, buffer= {= self.stack_buffer =})
+    stack = new Stack(name="xppu.stack", buffer= {= self.stack_buffer =})
     output is_stack_empty
     stack.is_empty -> is_stack_empty;
     output stack_wp_at_pickup
     stack.wp_at_pickup -> stack_wp_at_pickup;
-    crane = new Crane(name={= self.name + ".crane" =})
-    stamp = new Stamp(name={= self.name + ".stamp" =})
-    lsc = new LSConveyor(name={= self.name + ".lsc" =})
+    crane = new Crane(name="xppu.crane")
+    stamp = new Stamp(name="xppu.stamp")
+    lsc = new LSConveyor(name="xppu.lsc")
 
     stack.wp_at_pickup -> crane.wp_in_stack
     crane.wp_out_lsc -> lsc.wp_in_start
