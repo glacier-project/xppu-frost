@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # List of demo directories (relative to SCRIPT_DIR)
 DEMOS=(
-    "simple_demo"
+    "simple_demo" "standalone"
 )
 
 FAILED_DEMOS=()
