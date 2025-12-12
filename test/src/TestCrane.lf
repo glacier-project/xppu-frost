@@ -72,7 +72,6 @@ main reactor {
 
         crane_cmd, expected_pos, expected_time = self.cmds.pop(0)
         current_time = lf.time.logical_elapsed()
-        epsilon = MSECS(1)  # Allowable timing error of 1ms
 
         assert expected_pos == position, f"Expected position {expected_pos}, got {position}"
         assert (current_time - expected_time) < epsilon, f"Expected time at least {expected_time} ns, got {current_time} ns"
