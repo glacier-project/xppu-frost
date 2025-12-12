@@ -1,0 +1,69 @@
+target Python{
+    fast: true,
+    timeout: 60 s,
+}
+
+import Stamp from "../../src/stamp/Stamp.lf"
+
+preamble{=
+import uuid
+from frost import *
+from stamp import StampCmd
+from material import Position, Material, SteelMaterial, PlasticMaterial
+from copy import deepcopy
+
+logger = logging.getLogger("test_stamp")
+logger.setLevel(logging.DEBUG)
+epsilon = MSECS(1)  # Allowable timing error of 1ms
+cmds = [
+    (SteelMaterial(id=str(uuid.uuid4())), StampCmd.STAMP_LIGHT_P, SECS(2.001)),
+    (PlasticMaterial(id=str(uuid.uuid4())), StampCmd.STAMP_MEDIUM_P, SECS(4.202)),
+    (SteelMaterial(id=str(uuid.uuid4())), StampCmd.STAMP_HEAVY_P, SECS(6.603))
+]
+=}
+
+main reactor {
+    s = new Stamp(name = "stamp")
+    logical action send_next_cmd
+    logical action set_cmd
+
+    state cmds = {=
+        deepcopy(cmds)
+    =}
+    state received_cmds = []
+
+    reaction(startup) -> send_next_cmd{=
+        send_next_cmd.schedule(0)
+    =}
+
+    reaction(send_next_cmd) -> s.wp_in, set_cmd{=
+        if not self.cmds:
+            return  # No more commands to send
+
+        wp, cmd, delay = self.cmds.pop(0)
+        logger.debug(f"Sending command to Stamp: {cmd} with WP: {wp} and delay: {delay} s")
+        s.wp_in.set(deepcopy(wp))
+        set_cmd.schedule(0, cmd)
+    =}
+
+    reaction(set_cmd) -> s.cmd{=
+        s.cmd.set(set_cmd.value)
+    =}
+
+    reaction(s.wp_out) -> send_next_cmd{=
+        received_wp = s.wp_out.value
+        logger.debug(f"Received WP from Stamp: {received_wp}")
+
+        self.received_cmds.append((received_wp, lf.time.logical_elapsed()))
+        send_next_cmd.schedule(0)
+    =}
+
+    reaction(shutdown) {=
+        assert len(self.received_cmds) == len(cmds), f"Expected {len(cmds)} received commands, got {len(self.received_cmds)}"
+
+        for i, (wp, timestamp) in enumerate(self.received_cmds):
+            assert wp == cmds[i][0], f"At index {i}, expected WP {cmds[i][0]}, got {wp}"
+            expected_timestamp = cmds[i][2]
+            assert ((timestamp - expected_timestamp) / epsilon) < 1, f"At index {i}, expected timestamp {expected_timestamp}, got {timestamp}"
+    =}
+}
