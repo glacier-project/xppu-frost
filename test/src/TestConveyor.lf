@@ -1,14 +1,13 @@
 target Python{
     fast: true,
     timeout: 180 s,
-    // files: [    ]
 }
 
 import Conveyor from "../../src/conveyor/Conveyor.lf";
 
 preamble{=
 import uuid
-from material import SteelMaterial
+from material import SteelMaterial, PlasticMaterial
 
 logger = logging.getLogger("test_conveyor")
 logger.setLevel(logging.DEBUG)
@@ -21,7 +20,7 @@ main reactor TestConveyor {
     state wps = {=
         [
             SteelMaterial(id=str(uuid.uuid4())),
-            SteelMaterial(id=str(uuid.uuid4()))
+            PlasticMaterial(id=str(uuid.uuid4()))
         ]
     =}
     state wp_index = 0

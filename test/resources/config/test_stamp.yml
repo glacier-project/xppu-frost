@@ -1,0 +1,5 @@
+time_precision: NSECS
+logging_level: DEBUG
+reactors:
+  stamp:
+    logging_level: DEBUG
