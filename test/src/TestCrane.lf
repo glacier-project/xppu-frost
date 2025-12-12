@@ -15,6 +15,7 @@ from frost import *
 from copy import deepcopy
 from material import SteelMaterial, Material
 
+epsilon = MSECS(1)  # Allowable timing error of 1ms
 logger = logging.getLogger("test_crane")
 logger.setLevel(logging.DEBUG)
 crane_dpos={
@@ -74,7 +75,7 @@ main reactor {
         current_time = lf.time.logical_elapsed()
 
         assert expected_pos == position, f"Expected position {expected_pos}, got {position}"
-        assert (current_time - expected_time) < epsilon, f"Expected time at least {expected_time} ns, got {current_time} ns"
+        assert ((current_time - expected_time) / epsilon) < 1, f"Expected time at least {expected_time} ns, got {current_time} ns"
     =}
 
     reaction (c.current_wp, c.wp_out_stack, c.wp_out_stamp, c.wp_out_lsc) {=
