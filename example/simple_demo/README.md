@@ -86,7 +86,10 @@ simple_demo/
 ├── src/
 │   └── Main.lf              # Main reactor with KafkaProducer and XPPUScheduler
 ├── resources/
-│   └── frost_config.yml     # Frost configuration
+│   ├── frost_config.yml     # Frost configuration
+│   ├── data_model/          # Machine data model definitions
+│   ├── scheduling_instances/# Pre-defined scheduling instances
+│   └── template/            # Templates for configuration
 ├── test/
 │   └── consumer.py          # Sample Kafka consumer
 ├── Dockerfile               # Container build instructions

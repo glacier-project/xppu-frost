@@ -1,0 +1,8 @@
+services:
+  xppu-frost-standalone:
+    image: xppu-frost-standalone:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # -f false to disable fast mode and have real-time execution
+    command: [python, src-gen/Main/Main.py, -f, 'false']
