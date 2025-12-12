@@ -1,0 +1,103 @@
+time_precision: MSECS
+logging_level: WARNING
+reactors:
+  xppu:
+    logging_level: DEBUG
+    parameters:
+      data_model_path: ../../resources/data_model/xppu.yml
+    reactors:
+      stack:
+        logging_level: WARNING
+        parameters:
+          _ref_x: 0.0   # m
+          _ref_y: 0.0   # m
+          _c_angle: 0.0 # radians
+        reactors:
+          mc:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.07    # m
+              _is_retracted: true        # initial state
+      crane:
+        logging_level: WARNING
+        parameters:
+          _ref_x: 0.2275  # m
+          _ref_y: 0.8275  # m
+          _length: 0.105  # m
+        reactors:
+          mc:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.045   # m
+              _is_retracted: false       # initial state
+          r_base:
+            logging_level: WARNING
+            reactors:
+              motor:
+                logging_level: WARNING
+                parameters:
+                  _ang_speed: 0.698132 # rad/s
+      stamp:
+        logging_level: WARNING
+        parameters:
+          _ref_x: 0.0                # m
+          _ref_y: 1.5                # m
+          _c_angle: 0.0              # radians
+          _stamp_light_p_delay: 2    # s
+          _stamp_medium_p_delay: 2.2 # s
+          _stamp_heavy_p_delay: 2.4  # s
+        reactors:
+          mc:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.13    # m
+              _is_retracted: false       # initial state
+          bc:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.055   # m
+              _is_retracted: true        # initial state
+      lsc:
+        logging_level: WARNING
+        reactors:
+          mc_ramp_start:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.085   # m
+              _is_retracted: true        # initial state
+          mc_pac:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 472.222  # m/s
+              _extension_length: 0.085   # m
+              _is_retracted: true        # initial state
+          mc_ramp_mid:
+            logging_level: WARNING
+            parameters:
+              _retraction_speed: 223.684 # m/s
+              _extension_speed: 531.25   # m/s
+              _extension_length: 0.085   # m
+              _is_retracted: true        # initial state
+  frost_bus:
+    logging_level: WARNING
+    parameters:
+      data_model_path: ../../resources/data_model/bus.yml
+  xppu_scheduler:
+    logging_level: INFO
+    parameters:
+      data_model_path: resources/data_model/xppu_scheduler.yml
+      scheduling_instance: resources/scheduling_instances/instance.json
+      recipe_template: resources/template/sc14_recipe.json
+  kafka_producer:
+    logging_level: WARNING

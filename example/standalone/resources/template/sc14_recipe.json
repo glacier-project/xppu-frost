@@ -1,0 +1,31 @@
+{
+  "id": "0fcbfb28-bdf0-4650-9eec-5e9c7dd20d64",
+  "name": "Scenario_14",
+  "tasks": [
+    {
+      "id": "efd468fd-67c9-4e7a-a683-cd3c951547ce",
+      "name": "PickStackStampToLSC",
+      "processing_time": 25,
+      "requires": [
+        "stack",
+        "stamp",
+        "crane"
+      ],
+      "priority": 1
+    },
+    {
+      "id": "7cc1b280-214a-42cc-a660-151b19dc714f",
+      "name": "LSCToRampMid",
+      "processing_time": 5,
+      "dependencies": [
+        "efd468fd-67c9-4e7a-a683-cd3c951547ce"
+      ],
+      "requires": [
+        "lsc"
+      ],
+      "priority": 1
+    }
+  ],
+  "priority": 3,
+  "due_date": 1405
+}

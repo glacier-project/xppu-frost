@@ -9,13 +9,22 @@
 //   docker buildx bake && cd example/simple_demo && docker compose up
 
 group "default" {
-  targets = ["base", "simple_demo"]
+  targets = ["base", "standalone", "simple_demo"]
 }
 
 target "base" {
   context    = "."
   dockerfile = "Dockerfile"
   tags       = ["xppu-frost-base:latest"]
+}
+
+target "standalone" {
+  context    = "example/standalone"
+  dockerfile = "Dockerfile"
+  tags       = ["xppu-frost-standalone:latest"]
+  contexts   = {
+    xppu-frost-base = "target:base"
+  }
 }
 
 target "simple_demo" {
