@@ -211,7 +211,7 @@ reactor Conveyor(
             for guard in guards:
                 if not guard.is_active(wp):
                     continue
-                self.logger.debug(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
+                self.logger.info(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
                 shape.collision(guard.guard_area, wp_angle)
                 end_position = wp.shape.centroid_pos
                 self.logger.debug(f"New center at {end_position}")
@@ -220,7 +220,7 @@ reactor Conveyor(
             if i > 0 and wp != self._wps[i-1] and shape.intersects(self._wps[i-1].shape):
                 shape.collision(self._wps[i-1].shape, wp_angle)
                 end_position = wp.shape.centroid_pos
-                self.logger.warning(f"Detected collision of WP {wp} with wp {self._wps[i-1]}, new center at {end_position}")
+                self.logger.debug(f"Detected collision of WP {wp} with wp {self._wps[i-1]}, new center at {end_position}")
 
             if i == 0 and not self._conveyor_shape.contains(shape):
                 # remove WP
