@@ -1,0 +1,8 @@
+time_precision: MSECS
+logging_level: DEBUG
+reactors:
+  rfc:
+    logging_level: INFO
+    parameters:
+      _speed: 0.185 # m/s
+      _is_on: false
