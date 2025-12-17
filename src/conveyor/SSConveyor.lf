@@ -1,0 +1,99 @@
+target Python{
+    files: [
+        "../python-lib/conveyor.py",
+        "../python-lib/ssc.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/monostable_cylinder.py",
+        "../python-lib/guard.py",
+    ]
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+import Conveyor from "Conveyor.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point, ComponentShape
+from material import Material
+from position_sensor import PositionSensor
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from guard import Guard
+from conveyor import ConveyorCmd
+from ssc import SSCCmdType
+=}
+
+reactor SSConveyor extends Conveyor{
+    preamble{=
+        PS_WIDTH = 0.016
+        PS_LENGTH = 0.055
+        PSS_OFFSET = 0.05
+        PSM_OFFSET = 0.33
+        PSE_OFFSET = 0.51
+        MC_RFC_OFFSET = 0.41
+        MC_AREA_WIDTH = 0.016
+        MC_AREA_LENGTH = 0.055
+    =}
+
+    output wp_out_rfc
+    output mc_rfc_state
+
+    mc_rfc = new MonostableCylinder(
+        name={=self.name + ".mc_rfc"=},
+        retraction_speed=274.194, # m/s t= 0.38ms
+        extension_speed=531.25, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=True
+    )
+    mc_rfc.s -> mc_rfc_state
+
+    state _position_sensor_start = {=PositionSensor(name="ps-start", working_area=self._conveyor_shape.get_sensor_shape(self.PSS_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    state _position_sensor_mid = {=PositionSensor(name="ps-mid", working_area=self._conveyor_shape.get_sensor_shape(self.PSM_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+    state _mc_rfc_delay
+    state _mc_rfc_area = {= self._conveyor_shape.get_sensor_shape(self.MC_RFC_OFFSET, self.MC_AREA_WIDTH, self.MC_AREA_LENGTH) =}
+    state _mc_rfc_guard = {= Guard(name="mc-rfc-guard", guard_area=self._mc_rfc_area, active=False) =}
+    state _wp_to_rfc
+
+    state _position_sensor_end = {=PositionSensor(name="ps-end", working_area=self._conveyor_shape.get_sensor_shape(self.PSE_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    reaction (startup) {=
+        self._mc_rfc_delay = convert_time(
+            (self.MC_RFC_OFFSET+(self.MC_AREA_WIDTH/2)-self.PSM_OFFSET)/self.speed, TimePrecision.SECS,
+            TimePrecision.NSECS
+
+        )
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_mid,
+            triggering_cmd=SSCCmdType.T_TO_RFC,
+            target_action="activate_mc_rfc",
+            delay=self._mc_rfc_delay
+        )
+        self.add_guard(self._mc_rfc_guard)
+    =}
+
+    // @label handle_ps_actions
+    reaction (trigger_ps_action) -> mc_rfc.cmd{=
+        action, wp = trigger_ps_action.value
+
+        if action == "activate_mc_rfc":
+            self.logger.debug("Activating MC RFC")
+            mc_rfc.cmd.set(MonostableCylinderCmd.EXTEND)
+            self._wp_to_rfc = wp
+    =}
+
+    // @label handle_mc_rfc_state_update
+    reaction (mc_rfc.s) -> mc_rfc.cmd, wp_out_rfc{=
+        self.handle_mc_state_update(
+            mc_state=mc_rfc.s.value,
+            mc_guard=self._mc_rfc_guard,
+            cmd_type=SSCCmdType.T_TO_RFC,
+            expected_wp=self._wp_to_rfc,
+            mc_cmd_evt=mc_rfc.cmd,
+            wp_out_evt=wp_out_rfc
+        )
+    =}
+}
