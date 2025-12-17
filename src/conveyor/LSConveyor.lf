@@ -110,6 +110,7 @@ reactor LSConveyor extends Conveyor{
             target_action="activate_mc_pac",
             delay=self._mc_pac_delay
         )
+        self.add_guard(self._mc_pac_guard)
 
         # Add PS triggers for MC Ramp Mid
         self._mc_ramp_mid_delay = convert_time((self.MC_RM_OFFSET+self.MC_AREA_WIDTH/2-self.PSM_OFFSET)/self.speed, TimePrecision.SECS, TimePrecision.NSECS)
