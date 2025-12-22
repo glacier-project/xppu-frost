@@ -1,0 +1,19 @@
+from enum import Enum
+from conveyor import CCmdType
+
+class PACCmdType(str, Enum):
+    T_TO_PS_START = "T_TO_PS_START"
+    # T_TO_PS_END = "T_TO_PS_END"
+    T_TO_END = CCmdType.T_TO_END.value
+    T_TO_START = CCmdType.T_TO_START.value
+    PICK_FROM_POS1 = "PICK_FROM_POS1"
+    PICK_FROM_POS2 = "PICK_FROM_POS2"
+    PICK_FROM_POS3 = "PICK_FROM_POS3"
+    PICK_FROM_POS4 = "PICK_FROM_POS4"
+    PUTDOWN_TO_POS1 = "PUTDOWN_TO_POS1"
+    PUTDOWN_TO_POS2 = "PUTDOWN_TO_POS2"
+    PUTDOWN_TO_POS3 = "PUTDOWN_TO_POS3"
+    PUTDOWN_TO_POS4 = "PUTDOWN_TO_POS4"
+    # Aliases
+    T_TO_LSC = T_TO_START
+    T_TO_SSC = T_TO_END

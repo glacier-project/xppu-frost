@@ -1,0 +1,139 @@
+target Python{
+    files: [
+        "../python-lib/conveyor.py",
+        "../python-lib/pac.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/monostable_cylinder.py",
+        "../python-lib/guard.py",
+    ]
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+import Conveyor from "Conveyor.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point, ComponentShape
+from material import Material, MATERIAL_WIDTH, MaterialType
+from position_sensor import PositionSensor
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from guard import Guard
+from conveyor import ConveyorCmd
+from pac import PACCmdType
+=}
+
+reactor PAConveyor extends Conveyor{
+    preamble{=
+        PS_WIDTH = 0.016
+        PS_LENGTH = 0.055
+        PSS_OFFSET = 0.13
+        PSE_OFFSET = 0.535
+        MC_GUARD_OFFSET = 0.15 # lock
+        MC_GUARD_WIDTH = 0.01
+        MC_GUARD_LENGTH = 0.055
+        PA_POS1_OFFSET = 0.055 # -1 cm to center the wider position width
+        PA_POS2_OFFSET = 0.095 # -1.5 cm to center the wider position width and match the guard
+        PA_POS3_OFFSET = 0.26 # -1 cm to center the wider position width
+        PA_POS4_OFFSET = 0.475 # -1 cm to center the wider position width
+        PA_POS_WIDTH = 0.055 # +2 cm to contain the materials
+        PA_POS_LENGTH = 0.055
+    =}
+
+    state _guard_switch_delay
+    state _position_sensor_start = {=PositionSensor(name="ps-start", working_area=self._conveyor_shape.get_sensor_shape(self.PSS_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+    state _position_sensor_end = {=PositionSensor(name="ps-end", working_area=self._conveyor_shape.get_sensor_shape(self.PSE_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    state _mc_guard_area = {= self._conveyor_shape.get_sensor_shape(self.MC_GUARD_OFFSET, self.MC_GUARD_WIDTH, self.MC_GUARD_LENGTH) =}
+    state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
+    state extend_mc_timestamp
+    state mc_guard_wp
+
+    logical action extend_mc
+    output mc_guard_state
+    output presence_sensor_start
+
+    mc_guard = new MonostableCylinder(
+        name={=self.name + ".mc_guard"=},
+        retraction_speed=223.684, # m/s t= 0.38ms
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=False
+    )
+    mc_guard.s -> mc_guard_state
+
+    reaction (startup) {=
+        # The time should be enough to let the WP pass the guard (dim guard + wp size + ps width)
+        material_travel_distance = (self.MC_GUARD_OFFSET - self.PSS_OFFSET ) + self.PS_WIDTH + self.MC_GUARD_WIDTH + MATERIAL_WIDTH
+        material_travel_time = material_travel_distance / self.speed # in seconds
+
+        self._guard_switch_delay = round(SECS(material_travel_time))
+        self.logger.info(f"Using guard switch delay: {self._guard_switch_delay} ns")
+
+        # Add PS triggers
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_start,
+            triggering_cmd=PACCmdType.T_TO_END,
+            target_action="disable_mc_guard",
+            delay=0
+        )
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_start,
+            triggering_cmd=PACCmdType.T_TO_PS_START,
+            target_action="remove_to_ps_start_cmd",
+            delay=0
+        )
+        self.add_guard(self._mc_guard)
+
+
+        if PYGAME_MANAGER:
+            PYGAME_MANAGER.add_static_element(self._position_sensor_start.working_area)
+            PYGAME_MANAGER.add_static_element(self._position_sensor_end.working_area)
+            PYGAME_MANAGER.add_static_element(self._mc_guard_area)
+    =}
+
+    // @label handle_ps_actions
+    reaction (trigger_ps_action) -> mc_guard.cmd{=
+        action, wp = trigger_ps_action.value
+
+        if action == "disable_mc_guard":
+            self.logger.warning(f"Disabling MC Guard to allow WP {wp} to pass")
+            mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
+            self.mc_guard_wp = wp
+
+        if action == "remove_to_ps_start_cmd":
+            # Remove the T_TO_PS_START command
+            self.logger.warning(f"Clearing T_TO_PS_START command for WP {wp}")
+            self.clear_cmd(wp, PACCmdType.T_TO_PS_START)
+    =}
+
+    reaction (extend_mc) -> mc_guard.cmd{=
+        allowed_wp = extend_mc.value
+        if lf.time.logical_elapsed() < self.extend_mc_timestamp:
+            return 0 # Not yet time to extend
+
+        self.logger.debug("Enabling MC Guard")
+        mc_guard.cmd.set(MonostableCylinderCmd.EXTEND)
+        self._mc_guard.disallow_wp(allowed_wp)
+    =}
+
+    // @label handle_mc_guard_state_update
+    reaction (mc_guard.s) -> mc_guard.cmd, extend_mc{=
+
+        mc_state=mc_guard.s.value
+        if mc_state == MonostableCylinderState.EXTENDING:
+            # # Activate guard stopping WPs
+            # self._mc_guard.activate()
+            pass
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # Deactivate guard allowing WPs to pass
+            self._mc_guard.allow_wp(self.mc_guard_wp)
+            # Extend the MC after some delay
+            self.extend_mc_timestamp = lf.time.logical_elapsed() + self._guard_switch_delay
+            extend_mc.schedule(self._guard_switch_delay, self.mc_guard_wp)
+    =}
+}

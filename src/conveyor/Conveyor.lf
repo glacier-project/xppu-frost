@@ -15,7 +15,7 @@ from frost import *
 import numpy as np
 from f_compare import cos, sin
 from shape import ConveyorBeltShape, Point, ComponentShape
-from material import Material
+from material import Material, MaterialType
 from position_sensor import PositionSensor
 from conveyor import ConveyorCmd
 =}
@@ -161,6 +161,25 @@ reactor Conveyor(
             self._is_on = False
     =}
 
+    method clear_cmd(wp, cmd_type){=
+        """Removes a specific command type for a given workpiece.
+
+        Args:
+            wp (Material): The workpiece whose command is to be removed.
+            cmd_type (ConveyorCmd): The command type to remove.
+        """
+        if wp in self._active_cmds and self._active_cmds[wp].cmd_type == cmd_type:
+            self.logger.debug(f"Clearing command {cmd_type} for WP {wp}")
+            self.remove_cmd(wp)
+    =}
+
+    reaction (startup) {=
+        # Initialize PlotManager
+        self.logger.info("Initializing PlotManager for Conveyor")
+        if PYGAME_MANAGER:
+            PYGAME_MANAGER.add_static_element(self._conveyor_shape, self.name)
+    =}
+
     // @label set_cmd
     reaction (cmd) {=
         cmd = cmd.value
@@ -211,7 +230,7 @@ reactor Conveyor(
             for guard in guards:
                 if not guard.is_active(wp):
                     continue
-                self.logger.info(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
+                self.logger.debug(f"Detected collision with guard {guard} for wp {wp} at position {wp.shape.centroid_pos}")
                 shape.collision(guard.guard_area, wp_angle)
                 end_position = wp.shape.centroid_pos
                 self.logger.debug(f"New center at {end_position}")
@@ -222,7 +241,7 @@ reactor Conveyor(
                 end_position = wp.shape.centroid_pos
                 self.logger.debug(f"Detected collision of WP {wp} with wp {self._wps[i-1]}, new center at {end_position}")
 
-            if i == 0 and not self._conveyor_shape.contains(shape):
+            if i == 0 and not self._conveyor_shape.intersects(shape):
                 # remove WP
                 self.remove_wp(wp, wp_out)
                 self.logger.debug(f"WP {wp} exited conveyor at position {shape.centroid_pos}")
@@ -231,8 +250,9 @@ reactor Conveyor(
         for sensor, triggering_cmd, target_action, delay in self._ps_triggers:
             cmds = [cmd for cmd in self._active_cmds.values() if cmd.cmd_type == triggering_cmd]
 
-            wp = [cmd.wp for cmd in cmds if sensor.is_detected(cmd.wp)]
-            assert len(wp) <= 1, "More than one WP detected by position sensor"
+            wp = [cmd.wp for cmd in cmds if sensor.is_detected(cmd.wp, triggering_cmd)]
+
+            # assert len(wp) <= 1, "More than one WP detected by position sensor"
 
             if len(wp) != 0:
                 self.logger.info(f"Position sensor {sensor.name} detected WP {wp[0]} for command {triggering_cmd}, scheduling action.")

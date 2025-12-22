@@ -1,0 +1,85 @@
+target Python{
+    fast: false,
+    timeout: 7 s,
+    single-threaded: true,
+    files: [
+        "../src/python-lib/viewer.py",
+    ]
+}
+
+import PAConveyor from "../../src/conveyor/PAConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_rfconveyor")
+logger.setLevel(logging.DEBUG)
+
+# Starts the pygame mng
+from viewer import run_pygame_event_loop_in_thread, stop_pygame_event_loop, get_pygame_manager, initialize_pygame_manager
+initialize_pygame_manager(width=1200, height=600, fps=30)
+PYGAME_MANAGER = get_pygame_manager()
+run_pygame_event_loop_in_thread()
+
+wps = [
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_SSC),
+    (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_SSC),
+    (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+]
+for wp in wps:
+    PYGAME_MANAGER.add_dynamic_element(wp[0].shape, wp[0].id[-4:] )
+=}
+
+main reactor TestPAConveyor {
+    state wp_index = 0
+    state wps = {=
+        wps
+    =}
+    state c_wps_received = []
+
+    logical action set_cmd
+    timer add_wps(0 ms, 300 ms)
+
+    c = new PAConveyor(name="pac",
+        ref_x=0.255, # m
+        ref_y=0.45, # m
+        c_angle=0, # radians
+        length=0.60, # mchat
+        width=0.055, # m
+        speed=0.185 # m/s
+    )
+
+    reaction (add_wps) -> c.wp_in_start, c.cmd{=
+        if self.wp_index >= len(self.wps):
+            return 0 # No more WPs to add
+
+        wp, wp_cmd_type = self.wps[self.wp_index]
+        self.wp_index += 1
+        c.wp_in_start.set(wp)
+        c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
+        logger.debug(f"Added WP {wp} to RFConveyor with command {wp_cmd_type}")
+    =}
+
+    reaction (set_cmd) -> c.cmd{=
+        c.cmd.set(set_cmd.value)
+    =}
+
+    reaction (c.wp_out_end) -> set_cmd{=
+        if c.wp_out_end.is_present:
+            logger.debug(f"Received WP {c.wp_out_end.value} from end")
+            self.c_wps_received.append((c.wp_out_end.value, PACCmdType.T_TO_SSC))
+            # Set the cmd for the next wp
+            if len(self.c_wps_received) < len(self.wps):
+                wp, cmd = self.wps[len(self.c_wps_received)]
+                if cmd == PACCmdType.T_TO_PS_START:
+                    set_cmd.schedule(0, ConveyorCmd(wp, PACCmdType.T_TO_SSC))
+                    # Update expected WPs
+                    self.wps[len(self.c_wps_received)] = (wp, PACCmdType.T_TO_SSC)
+    =}
+
+    reaction (shutdown) {=
+        stop_pygame_event_loop()
+    =}
+}
