@@ -36,6 +36,7 @@ stack_buffer = [
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
+PYGAME_MANAGER = None
 =}
 
 reactor XPPUTester extends FrostMachine {
