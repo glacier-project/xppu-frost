@@ -51,10 +51,11 @@ reactor PAConveyor extends Conveyor{
     state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
     state extend_mc_timestamp
     state mc_guard_wp
+    state _mc_state
 
     logical action extend_mc
     output mc_guard_state
-    output presence_sensor_start
+    output ps_start_wp_detected
 
     mc_guard = new MonostableCylinder(
         name={=self.name + ".mc_guard"=},
@@ -67,8 +68,8 @@ reactor PAConveyor extends Conveyor{
 
     reaction (startup) {=
         # The time should be enough to let the WP pass the guard (dim guard + wp size + ps width)
-        material_travel_distance = (self.MC_GUARD_OFFSET - self.PSS_OFFSET ) + self.PS_WIDTH + self.MC_GUARD_WIDTH + MATERIAL_WIDTH
-        material_travel_time = material_travel_distance / self.speed # in seconds
+        max_wp_travel_distance = (self.MC_GUARD_OFFSET - self.PSS_OFFSET) + self.PS_WIDTH + self.MC_GUARD_WIDTH + MATERIAL_WIDTH
+        material_travel_time = max_wp_travel_distance / self.speed # in seconds
 
         self._guard_switch_delay = round(SECS(material_travel_time))
         self.logger.info(f"Using guard switch delay: {self._guard_switch_delay} ns")
@@ -96,25 +97,30 @@ reactor PAConveyor extends Conveyor{
     =}
 
     // @label handle_ps_actions
-    reaction (trigger_ps_action) -> mc_guard.cmd{=
+    reaction (trigger_ps_action) -> mc_guard.cmd, ps_start_wp_detected{=
         action, wp = trigger_ps_action.value
 
         if action == "disable_mc_guard":
             self.logger.warning(f"Disabling MC Guard to allow WP {wp} to pass")
             mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
+            assert self.mc_guard_wp is None, "MC Guard WP should be None when disabling guard"
             self.mc_guard_wp = wp
 
         if action == "remove_to_ps_start_cmd":
             # Remove the T_TO_PS_START command
             self.logger.warning(f"Clearing T_TO_PS_START command for WP {wp}")
             self.clear_cmd(wp, PACCmdType.T_TO_PS_START)
+            ps_start_wp_detected.set(wp)
     =}
+
+    // reaction(retract_switch) -> mc_guard.cmd{=
+
+    //     self.logger.warning("Retract switch activated, retracting MC Guard")
+    //     mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
+    // =}
 
     reaction (extend_mc) -> mc_guard.cmd{=
         allowed_wp = extend_mc.value
-        if lf.time.logical_elapsed() < self.extend_mc_timestamp:
-            return 0 # Not yet time to extend
-
         self.logger.debug("Enabling MC Guard")
         mc_guard.cmd.set(MonostableCylinderCmd.EXTEND)
         self._mc_guard.disallow_wp(allowed_wp)
@@ -122,18 +128,19 @@ reactor PAConveyor extends Conveyor{
 
     // @label handle_mc_guard_state_update
     reaction (mc_guard.s) -> mc_guard.cmd, extend_mc{=
-
         mc_state=mc_guard.s.value
+        self._mc_state = mc_state
+
         if mc_state == MonostableCylinderState.EXTENDING:
-            # # Activate guard stopping WPs
-            # self._mc_guard.activate()
+            pass
+
+        if mc_state == MonostableCylinderState.EXTENDED:
             pass
 
         if mc_state == MonostableCylinderState.RETRACTED:
-            # Deactivate guard allowing WPs to pass
+            # Deactivate guard allowing the WP to pass
             self._mc_guard.allow_wp(self.mc_guard_wp)
-            # Extend the MC after some delay
-            self.extend_mc_timestamp = lf.time.logical_elapsed() + self._guard_switch_delay
             extend_mc.schedule(self._guard_switch_delay, self.mc_guard_wp)
+            self.mc_guard_wp = None
     =}
 }

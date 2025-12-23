@@ -1,7 +1,7 @@
 target Python{
-    fast: false,
-    timeout: 7 s,
-    single-threaded: true,
+    fast: true,
+    timeout: 15 s,
+    single-threaded: false,
     files: [
         "../src/python-lib/viewer.py",
     ]
@@ -15,21 +15,21 @@ from material import SteelMaterial, PlasticMaterial
 
 logger = logging.getLogger("test_rfconveyor")
 logger.setLevel(logging.DEBUG)
-
-# Starts the pygame mng
-from viewer import run_pygame_event_loop_in_thread, stop_pygame_event_loop, get_pygame_manager, initialize_pygame_manager
-initialize_pygame_manager(width=1200, height=600, fps=30)
-PYGAME_MANAGER = get_pygame_manager()
-run_pygame_event_loop_in_thread()
-
 wps = [
-    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_SSC),
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
     (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
-    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_SSC),
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
     (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
 ]
-for wp in wps:
-    PYGAME_MANAGER.add_dynamic_element(wp[0].shape, wp[0].id[-4:] )
+PYGAME_MANAGER = None
+
+# # Starts the pygame mng
+# from viewer import run_pygame_event_loop_in_thread, stop_pygame_event_loop, get_pygame_manager, initialize_pygame_manager
+# initialize_pygame_manager(width=1200, height=600, fps=30)
+# PYGAME_MANAGER = get_pygame_manager()
+# run_pygame_event_loop_in_thread()
+# for wp in wps:
+#     PYGAME_MANAGER.add_dynamic_element(wp[0].shape, wp[0].id[-4:] )
 =}
 
 main reactor TestPAConveyor {
@@ -38,6 +38,8 @@ main reactor TestPAConveyor {
         wps
     =}
     state c_wps_received = []
+    state pac_ps_wp_detected
+    state pac_mc_state
 
     logical action set_cmd
     timer add_wps(0 ms, 300 ms)
@@ -66,20 +68,32 @@ main reactor TestPAConveyor {
         c.cmd.set(set_cmd.value)
     =}
 
+    reaction(c.ps_start_wp_detected, c.mc_guard_state) -> set_cmd{=
+        if c.mc_guard_state.is_present:
+            self.pac_mc_state = c.mc_guard_state.value
+        if c.ps_start_wp_detected.is_present:
+            self.pac_ps_wp_detected = c.ps_start_wp_detected.value
+
+        # If WP detected at PS_START, and the MC Guard is extended, retract it
+        if self.pac_mc_state == MonostableCylinderState.EXTENDED and self.pac_ps_wp_detected:
+            wp = self.pac_ps_wp_detected
+            logger.info(f"WP {wp} detected at PS_START, retracting MC Guard")
+            set_cmd.schedule(MSECS(0), ConveyorCmd(wp, PACCmdType.T_TO_SSC))
+    =}
+
     reaction (c.wp_out_end) -> set_cmd{=
-        if c.wp_out_end.is_present:
-            logger.debug(f"Received WP {c.wp_out_end.value} from end")
-            self.c_wps_received.append((c.wp_out_end.value, PACCmdType.T_TO_SSC))
-            # Set the cmd for the next wp
-            if len(self.c_wps_received) < len(self.wps):
-                wp, cmd = self.wps[len(self.c_wps_received)]
-                if cmd == PACCmdType.T_TO_PS_START:
-                    set_cmd.schedule(0, ConveyorCmd(wp, PACCmdType.T_TO_SSC))
-                    # Update expected WPs
-                    self.wps[len(self.c_wps_received)] = (wp, PACCmdType.T_TO_SSC)
+        logger.debug(f"Received WP {c.wp_out_end.value} from end")
+        self.c_wps_received.append((c.wp_out_end.value, PACCmdType.T_TO_SSC))
     =}
 
     reaction (shutdown) {=
-        stop_pygame_event_loop()
+        assert len(self.c_wps_received) == len(self.wps), f"Expected {len(self.wps)} WPs received, got {len(self.c_wps_received)}"
+        for i in range(len(self.wps)):
+            expected_wp, _ = self.wps[i]
+            received_wp, _ = self.c_wps_received[i]
+            assert expected_wp == received_wp, f"WP mismatch at index {i}: expected {expected_wp}, got {received_wp}"
+
+        if PYGAME_MANAGER:
+            stop_pygame_event_loop()
     =}
 }
