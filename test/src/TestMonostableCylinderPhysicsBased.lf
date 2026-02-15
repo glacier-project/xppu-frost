@@ -1,0 +1,88 @@
+target Python{
+    fast: true,
+    timeout: 5 s,
+}
+
+import MonostableCylinderPhysicsBased from "../../src/common/MonostableCylinderPhysicBased.lf"
+
+preamble{=
+import logging
+from frost import *
+from monostable_cylinder_physics_based import MonostableCylinderCmd, MonostableCylinderState
+
+logger = logging.getLogger("test_monostable_cylinder")
+logger.setLevel(logging.DEBUG)
+=}
+
+main reactor {
+    state prev_state
+    state n_iterations = 3
+    state counter = 0
+    state cmd_time = 0
+    state extension_time = 0
+    state retraction_time = 0
+    state pending_cmd
+
+    timer check_state(0, 5 ms)
+
+    mc = new MonostableCylinderPhysicsBased(
+        name="mc_physicsbased",
+        is_retracted=True,
+        dt = 1 ms,
+        L_max = 0.1,
+        valve_coefficient = 0.0001
+    )
+
+    reaction(startup) {=
+        logger.info("Starting MonostableCylinderPhysicsBased test")
+        self.pending_cmd = None
+    =}
+    reaction(check_state) -> mc.cmd {=
+        if self.pending_cmd is not None and self.counter < self.n_iterations:
+            mc.cmd.set(self.pending_cmd)
+            self.cmd_time = lf.time.logical_elapsed()
+            logger.info(f"Sent command: {MonostableCylinderCmd(self.pending_cmd).name}")
+            self.pending_cmd = None
+    =}
+    reaction(mc.s) {=
+        if self.counter >= self.n_iterations:
+            return 0
+
+        prev_state = self.prev_state
+        state = mc.s.value
+        current_time = lf.time.logical_elapsed()
+
+        logger.info(f"State changed: {MonostableCylinderState(prev_state).name if prev_state else 'None'} -> {MonostableCylinderState(state).name}")
+
+        if prev_state is None:
+            # Initial state
+            assert state == MonostableCylinderState.RETRACTED, f"Expected RETRACTED, got {MonostableCylinderState(state).name}"
+            self.pending_cmd = MonostableCylinderCmd.EXTEND
+        elif state == MonostableCylinderState.RETRACTED:
+            assert prev_state == MonostableCylinderState.RETRACTING, f"Expected RETRACTING -> RETRACTED"
+            self.retraction_time = current_time - self.cmd_time
+            logger.info(f"Retraction completed in {self.retraction_time / 1e6:.1f} ms")
+            self.counter += 1
+            self.pending_cmd = MonostableCylinderCmd.EXTEND
+        elif state == MonostableCylinderState.EXTENDED:
+            assert prev_state == MonostableCylinderState.EXTENDING, f"Expected EXTENDING -> EXTENDED"
+            self.extension_time = current_time - self.cmd_time
+            logger.info(f"Extension completed in {self.extension_time / 1e6:.1f} ms")
+            self.pending_cmd = MonostableCylinderCmd.RETRACT
+        elif state == MonostableCylinderState.EXTENDING:
+            assert prev_state == MonostableCylinderState.RETRACTED, f"Expected RETRACTED -> EXTENDING"
+        elif state == MonostableCylinderState.RETRACTING:
+            assert prev_state == MonostableCylinderState.EXTENDED, f"Expected EXTENDED -> RETRACTING"
+        else:
+            raise Exception(f"Invalid state transition: {prev_state} -> {state}")
+
+        self.prev_state = state
+    =}
+    reaction(shutdown) {=
+        assert self.counter == self.n_iterations, f"Expected {self.n_iterations} iterations, but got {self.counter}"
+        logger.info(f"Test completed successfully with {self.counter} iterations")
+        if self.extension_time > 0 and self.retraction_time > 0:
+            logger.info(f"Average extension time: {self.extension_time / 1e6:.1f} ms")
+            logger.info(f"Average retraction time: {self.retraction_time / 1e6:.1f} ms")
+    =}
+}

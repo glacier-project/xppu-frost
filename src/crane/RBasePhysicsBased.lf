@@ -1,0 +1,117 @@
+target Python{
+    files: [
+        "../python-lib/rbase_physics_based.py"
+    ]
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+preamble{=
+import math
+import numpy as np
+from rbase_physics_based import (
+    RBasePhysicsBased as RBaseModel,
+    CraneCmd,
+    CranePos
+)
+=}
+
+reactor RBasePhysicsBased(
+    dt = 1 ms,
+    dpos_dict = {=dict()=},
+    mass_load = 0.400,
+    radius_load = 0.10,
+    m_crane = 0.400,
+    L_arm = 0.15,
+    Kp = 15.0,
+    Ki = 1.0,
+    Kd = 5.0,
+    max_velocity = 0.698132,
+    accuracy = 0.01,
+    initial_theta = 0.0
+) extends FrostBase {
+
+    input cmd
+
+    output angle
+    output d_pos
+    output velocity
+    output control_voltage
+
+    state rbase_model
+    state current_cmd
+    state target_angle
+    state prev_d_pos
+
+    timer physics_tick(0, dt)
+
+    reaction(startup) -> angle, velocity, control_voltage {=
+        dt_sec = self.dt / 1e9
+        self.logger.info(
+            f"Initializing RBasePhysicsBased with dt={dt_sec*1000:.1f}ms, "
+            f"mass_load={self.mass_load}kg, m_crane={self.m_crane}kg"
+        )
+        # Create RBase model 
+        self.rbase_model = RBaseModel(
+            motor_mass=self.mass_load,
+            radius_load=self.radius_load,
+            m_crane=self.m_crane,
+            L_arm=self.L_arm,
+            Kp=self.Kp,
+            Ki=self.Ki,
+            Kd=self.Kd,
+            max_velocity=self.max_velocity
+        )
+        initial_output = self.rbase_model.initialize(self.initial_theta)
+        self.current_cmd = None
+        self.target_angle = self.initial_theta
+        self.prev_d_pos = None
+        angle.set(initial_output["theta"])
+        velocity.set(initial_output["v_rot"])
+        control_voltage.set(initial_output["control_voltage"])
+        self.logger.info(
+            f"Motor initialized: theta={math.degrees(initial_output['theta']):.2f}deg, "
+            f"max_voltage={self.rbase_model.max_voltage:.4f}V"
+        )
+    =}
+
+    // @label _handle_cmd
+    reaction(cmd) {=
+        command = cmd.value
+        self.current_cmd = command
+        if command in self.dpos_dict:
+            self.target_angle = self.dpos_dict[command]
+            self.rbase_model.set_target(self.target_angle)
+            self.logger.info(
+                f"Command {command}: target angle = {math.degrees(self.target_angle):.2f}deg"
+            )
+        else:
+            self.logger.warning(f"Unknown command: {command}")
+    =}
+
+    // @label _physics_step
+    reaction(physics_tick) -> angle, d_pos, velocity, control_voltage {=
+        dt_sec = self.dt / 1e9
+        # Execute one simulation step
+        output = self.rbase_model.step(dt_sec)
+        new_angle = output["theta"]
+        new_velocity = output["v_rot"]
+        voltage = output["control_voltage"]
+        angle.set(new_angle)
+        velocity.set(new_velocity)
+        control_voltage.set(voltage)
+        # Check if position reached
+        if self.current_cmd is not None:
+            error = abs(new_angle - self.target_angle)
+            if error > math.pi:
+                error = 2 * math.pi - error
+            if error <= self.accuracy:
+                if self.prev_d_pos != self.current_cmd:
+                    self.logger.info(
+                        f"Position {self.current_cmd} reached at "
+                        f"{math.degrees(new_angle):.2f}deg"
+                    )
+                    d_pos.set(self.current_cmd)
+                    self.prev_d_pos = self.current_cmd
+    =}
+}

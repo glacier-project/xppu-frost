@@ -3,21 +3,27 @@ target Python{
         "../python-lib/crane.py",
         "../python-lib/material.py",
         "../python-lib/shape.py",
+        "../python-lib/monostable_cylinder_physics_based.py",
+        "../python-lib/rbase_physics_based.py",
     ]
 }
 
 import FrostBase from "../../frost/src/lib/FrostBase.lf";
-import RBase from "RBase.lf";
-import MonostableCylinder from "../common/MonostableCylinder.lf"
+import RBasePhysicsBased from "RBasePhysicsBased.lf";
+import MonostableCylinderPhysicsBased from "../common/MonostableCylinderPhysicBased.lf"
 
 preamble{=
 import numpy as np
 from crane import CraneCmd, CranePos
 from material import Material
 from shape import Point
+from monostable_cylinder_physics_based import (
+    MonostableCylinderCmd,
+    MonostableCylinderState
+)
 =}
 
-reactor Crane(
+reactor CranePhysicsBased(
     ref_x = 0.2275, # m
     ref_y = 0.8275, # m
     length = 0.105 # m
@@ -46,17 +52,29 @@ reactor Crane(
     state _is_picking_up = False
     state _is_putting_down = False
 
-    mc = new MonostableCylinder(
+    logical action deferred_mc_cmd
+
+    mc = new MonostableCylinderPhysicsBased(
         name={= self.name + ".mc" =},
-        retraction_speed=223.684, # m/s t= 0.38ms TODO check
-        extension_speed=472.222, # m/s t= 0.18ms TODO check
-        extension_length=0.045, # m
-        is_retracted=False
+        is_retracted=True,
+        dt = 1 ms,
+        L_max = 0.1,
+        valve_coefficient = 0.0001
     )
-    r_base = new RBase(
+    r_base = new RBasePhysicsBased(
         name={= self.name + ".r_base" =},
-        tick_interval=1 ms,
-        ang_speed=0.698132 # rad/s
+        dpos_dict={=crane_dpos=},
+        dt=1 ms,
+        mass_load=0.40,
+        radius_load=0.10,
+        m_crane=0.500,
+        L_arm=0.15,
+        Kp=15.0,
+        Ki=1.0,
+        Kd=5.0,
+        max_velocity=1.5708, # 90 deg/s
+        accuracy=0.04,
+        initial_theta=0.0
     )
     r_base.d_pos -> position
     r_base.angle -> angle
@@ -126,9 +144,14 @@ reactor Crane(
         self._current_angle = current_angle
     =}
 
+    // @label forward_deferred_mc_cmd
+    reaction (deferred_mc_cmd) -> mc.cmd{=
+        mc.cmd.set(deferred_mc_cmd.value)
+    =}
+
     // @label handle_mc_state_change
-    reaction (mc.s) -> current_wp, wp_out_stack, wp_out_stamp, wp_out_lsc, mc.cmd{=
-        mc_state = mc.s.value
+    reaction (mc.s) -> current_wp, wp_out_stack, wp_out_stamp, wp_out_lsc, deferred_mc_cmd{=
+        mc_state = MonostableCylinderState(mc.s.value)
         self.logger.debug(f"Crane MC state changed to {mc_state.name}")
 
         crane_position = self._current_postion
@@ -156,7 +179,8 @@ reactor Crane(
 
         if mc_state == MonostableCylinderState.RETRACTED:
             # After retracting, for both pickup and putdown, extend the MC again
-            mc.cmd.set(MonostableCylinderCmd.EXTEND)
+            # Use deferred action to break cyclic dependency
+            deferred_mc_cmd.schedule(0, MonostableCylinderCmd.EXTEND)
 
             if self._is_putting_down:
                 if crane_position == CranePos.POS_S:
