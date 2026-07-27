@@ -1,0 +1,85 @@
+target Python{
+    fast: true,
+    timeout: 180 s,
+}
+
+import XPPU from "../../src/XPPU.lf"
+import FrostBus from "../../frost/src/lib/FrostBus.lf"
+import FrostMachine from "../../frost/src/lib/FrostMachine.lf"
+
+preamble{=
+import uuid
+from frost import *
+import numpy as np
+from copy import deepcopy
+from crane import CranePos
+from material import Position, Material, SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_xppu_loop")
+logger.setLevel(logging.DEBUG)
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
+stack_buffer = [
+    SteelMaterial(id=str(uuid.uuid4())),
+    PlasticMaterial(id=str(uuid.uuid4())),
+    SteelMaterial(id=str(uuid.uuid4()))
+]
+PYGAME_MANAGER = None
+=}
+
+reactor XPPULoopTester extends FrostMachine {
+    state remaining_iterations = {= len(stack_buffer) =}
+    state method_completed = False
+    logical action execute_demo
+
+    reaction(connected_to_bus, execute_demo) -> channel_out{=
+        msg = self.message_builder.build_invoke_method_message(target=self._get_reactor_name(), node="/xPPUTester/Methods/RunLoopDemo")
+        self._set_channel_out_port(msg, channel_out)
+    =}
+
+    reaction(response_messages) -> execute_demo {=
+        for bank_index, message in response_messages.value:
+            if message.sender != self._get_reactor_name():
+                continue
+            if message.header.msg_name != MethodMsgName.COMPLETED:
+                continue
+            if message.payload.node == "/xPPUTester/Methods/RunLoopDemo":
+                self.remaining_iterations -= 1
+                if self.remaining_iterations > 0:
+                    self.logger.info(f"RunLoopDemo iteration completed, {self.remaining_iterations} remaining. Restarting...")
+                    execute_demo.schedule(0)
+                else:
+                    self.logger.info("RunLoopDemo method completed all iterations.")
+                    self.method_completed = True
+    =}
+
+    reaction (shutdown){=
+        assert self.remaining_iterations == 0, "Not all RunLoopDemo iterations completed"
+        assert self.method_completed, "RunLoopDemo method did not complete successfully"
+    =}
+}
+
+main reactor {
+    state received_wp = []
+
+    xppu = new XPPU(name="xppu", stack_buffer={=deepcopy(stack_buffer)=})
+    bus = new FrostBus(name="frost_bus", width=2)
+    xppu_tester = new XPPULoopTester(name="xppu_tester", update_interval=100 ms)
+
+    xppu.channel_out, xppu_tester.channel_out -> bus.channel_in
+    bus.channel_out -> xppu.channel_in, xppu_tester.channel_in after 0
+
+    reaction (xppu.rfc_wp_out_end){=
+        wp = xppu.rfc_wp_out_end.value
+        logger.info(f"Received workpiece at RFC exit: {wp}")
+        self.received_wp.append(wp)
+    =}
+
+    reaction (shutdown){=
+        assert self.received_wp == stack_buffer, f"Workpieces received {self.received_wp} do not match expected {stack_buffer}"
+    =}
+}
