@@ -174,9 +174,9 @@ reactor Conveyor(
     =}
 
     reaction (startup) {=
-        # Initialize PlotManager
-        self.logger.info("Initializing PlotManager for Conveyor")
+        # Register the conveyor belt as a static element in the viewer (if enabled)
         if PYGAME_MANAGER:
+            self.logger.info("Registering Conveyor shape with the viewer")
             PYGAME_MANAGER.add_static_element(self._conveyor_shape, self.name)
     =}
 
@@ -211,14 +211,20 @@ reactor Conveyor(
         dy = self._sin_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS))
         guards = self._guards
 
+        # insert_wp() sorts _wps so that index 0 is always the WP closest to the
+        # exit for the current travel direction (the sort key is direction-aware).
+        # So we always iterate in list order: i==0 is the leading WP that exits
+        # first, and self._wps[i-1] is the WP ahead of self._wps[i] for the
+        # neighbour-collision check below. Only the exit port and the collision
+        # push-back angle depend on the direction.
         if self.speed > 0:
-            wps = iter(self._wps)
             wp_out = wp_out_end
             wp_angle = self._conveyor_shape.angle
         else:
-            wps = reversed(self._wps)
             wp_out = wp_out_start
             wp_angle = (self._conveyor_shape.angle + np.pi) % (2 * np.pi)
+
+        wps = iter(self._wps)
 
         for i, wp in enumerate(wps):
 
@@ -252,8 +258,9 @@ reactor Conveyor(
 
             wp = [cmd.wp for cmd in cmds if sensor.is_detected(cmd.wp, triggering_cmd)]
 
-            # assert len(wp) <= 1, "More than one WP detected by position sensor"
-
+            # Several WPs may share the same command and be detected on the same
+            # tick (e.g. a queue on the PAConveyor), so a single-detection assert
+            # would be too strict; we handle the first one detected this tick.
             if len(wp) != 0:
                 self.logger.info(f"Position sensor {sensor.name} detected WP {wp[0]} for command {triggering_cmd}, scheduling action.")
                 trigger_ps_action.schedule(delay, (target_action, wp[0]))

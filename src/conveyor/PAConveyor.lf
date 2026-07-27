@@ -35,12 +35,6 @@ reactor PAConveyor extends Conveyor{
         MC_GUARD_OFFSET = 0.15 # lock
         MC_GUARD_WIDTH = 0.01
         MC_GUARD_LENGTH = 0.055
-        PA_POS1_OFFSET = 0.055 # -1 cm to center the wider position width
-        PA_POS2_OFFSET = 0.095 # -1.5 cm to center the wider position width and match the guard
-        PA_POS3_OFFSET = 0.26 # -1 cm to center the wider position width
-        PA_POS4_OFFSET = 0.475 # -1 cm to center the wider position width
-        PA_POS_WIDTH = 0.055 # +2 cm to contain the materials
-        PA_POS_LENGTH = 0.055
     =}
 
     state _guard_switch_delay
@@ -49,9 +43,7 @@ reactor PAConveyor extends Conveyor{
 
     state _mc_guard_area = {= self._conveyor_shape.get_sensor_shape(self.MC_GUARD_OFFSET, self.MC_GUARD_WIDTH, self.MC_GUARD_LENGTH) =}
     state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
-    state extend_mc_timestamp
     state mc_guard_wp
-    state _mc_state
 
     logical action extend_mc
     output mc_guard_state
@@ -113,12 +105,6 @@ reactor PAConveyor extends Conveyor{
             ps_start_wp_detected.set(wp)
     =}
 
-    // reaction(retract_switch) -> mc_guard.cmd{=
-
-    //     self.logger.warning("Retract switch activated, retracting MC Guard")
-    //     mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
-    // =}
-
     reaction (extend_mc) -> mc_guard.cmd{=
         allowed_wp = extend_mc.value
         self.logger.debug("Enabling MC Guard")
@@ -129,13 +115,6 @@ reactor PAConveyor extends Conveyor{
     // @label handle_mc_guard_state_update
     reaction (mc_guard.s) -> mc_guard.cmd, extend_mc{=
         mc_state=mc_guard.s.value
-        self._mc_state = mc_state
-
-        if mc_state == MonostableCylinderState.EXTENDING:
-            pass
-
-        if mc_state == MonostableCylinderState.EXTENDED:
-            pass
 
         if mc_state == MonostableCylinderState.RETRACTED:
             # Deactivate guard allowing the WP to pass

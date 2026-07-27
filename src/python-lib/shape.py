@@ -1,11 +1,10 @@
-from abc import abstractmethod
-from typing import override, Callable, Any
+from abc import ABC, abstractmethod
+from typing import override
 
 import pygame
 import numpy as np
 from shapely import Point, Polygon
 from shapely.affinity import rotate, translate
-from shapely.geometry.base import BaseGeometry
 from shapely.predicates import contains, crosses, intersects
 
 from f_compare import cos, definitely_greater_than, sin
@@ -18,17 +17,13 @@ STEEL_COLOR = (120, 120, 120)
 PLASTIC_COLOR = (255, 140, 0)
 
 
-class Shape:
+class Shape(ABC):
 
     def __init__(self, centroid_pos : Point, angle: float, color: tuple[int, int, int] = (0, 0, 0)) -> None:
         self.centroid_pos = centroid_pos
         self.poly = None
         self.angle = angle
         self.color = color
-
-    # def intersect(self, shape: ShapeType) -> bool:
-    #     polygon = self.get_poly()
-    #     return polygon.intersects(shape.get_poly())
 
     def get_poly(self) -> Polygon:
         if self.poly is not None:
@@ -88,37 +83,6 @@ class Shape:
         # fix position
         self.translate_to(x=x, y=y)
 
-        # # get min distance
-        # d1 = self._get_min_distance()
-        # d2 = shape._get_min_distance()
-
-        # # get x,y components of the offset
-        # dx = (d1 + d2) * cos(direction_angle, 1e-5)
-        # dy = (d1 + d2) * sin(direction_angle, 1e-5)
-
-        # # get coordinates
-        # shape_position = shape.centroid_pos
-        # target_x = shape_position.x - dx
-        # target_y = shape_position.y - dy
-
-        # # Check if self is actually behind shape in the direction of movement
-        # # by comparing current position with target position
-        # current_x = self.centroid_pos.x
-        # current_y = self.centroid_pos.y
-
-        # # Only move if self is behind (or at) the target position
-        # # i.e., moving forward would bring it closer to target
-        # move_dx = target_x - current_x
-        # move_dy = target_y - current_y
-
-        # # Check if the movement is in the same direction as direction_angle
-        # # (dot product should be positive or zero)
-        # dot = move_dx * cos(direction_angle, 1e-5) + move_dy * sin(direction_angle, 1e-5)
-
-        # if dot >= 0:
-        #     # self is behind or at target, safe to reposition
-        #     self.translate_to(x=target_x, y=target_y)
-
     @abstractmethod
     def _get_min_distance(self) -> float:
         pass
@@ -131,7 +95,6 @@ class Shape:
     def _get_origin(self) -> Point:
         pass
 
-    @abstractmethod
     def draw(self, surf: pygame.Surface, scale_factor: float) -> None:
         polygon = self.get_poly()
         points = [(x*scale_factor, y*scale_factor) for x, y in polygon.exterior.coords]
