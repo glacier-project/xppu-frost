@@ -1,0 +1,127 @@
+target Python{
+    files: [
+        "../python-lib/monostable_cylinder_physics_based.py",
+    ],
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+
+preamble{=
+from monostable_cylinder_physics_based import (
+    MonostableCylinderPhysicsBased,
+    MonostableCylinderCmd,
+    MonostableCylinderState
+)
+=}
+
+reactor MonostableCylinderPhysicsBased(
+    dt = 1 ms,
+    # Physics model parameters
+    L_max = 0.2,
+    P_supply = 400000.0,
+    A1 = 0.01,
+    A2 = 0.009,
+    piston_mass = 5.0,
+    viscous_friction = 500.0,
+    spring_stiffness = 10000.0,
+    spring_preload = 100.0,
+    valve_coefficient = 0.00006,
+    is_retracted = True
+) extends FrostBase {
+
+    input cmd
+    input f_load
+
+    output s
+    output position
+    output velocity
+    output pressure
+
+    state mc_state
+    state model
+    state physics_state
+    state current_cmd
+    state current_f_load
+    state prev_discrete_state
+
+    timer physics_tick(0, dt)
+
+    # @label _initialize
+    reaction(startup) -> s, position, velocity, pressure {=
+        dt_sec = self.dt / 1e9
+        self.logger.info(
+            f"Initializing MonostableCylinderPhysicsBased with dt={dt_sec}s, "
+            f"L_max={self.L_max}m, P_supply={self.P_supply}Pa"
+        )
+        # Create physics model with custom parameters
+        self.model = MonostableCylinderPhysicsBased(
+            L_max=self.L_max,
+            P_supply=self.P_supply,
+            A1=self.A1,
+            A2=self.A2,
+            m=self.piston_mass,
+            b=self.viscous_friction,
+            k=self.spring_stiffness,
+            F_pre=self.spring_preload,
+            C_v=self.valve_coefficient,
+        )
+        # Initialize state
+        self.physics_state = self.model.initialize()
+        # Set initial command based on is_retracted parameter
+        self.current_cmd = MonostableCylinderCmd.RETRACT if self._is_retracted else MonostableCylinderCmd.EXTEND
+        self.current_f_load = 0.0
+        self.prev_discrete_state = self.physics_state["retracting_state"]
+        # Output initial state
+        output_data = self.model.output(self.physics_state)
+        s.set(int(output_data["retracting_state"]))
+        position.set(output_data["x"])
+        velocity.set(output_data["v"])
+        pressure.set(output_data["P1"])
+        self.logger.info(
+            f"Initialized with state={MonostableCylinderState(self.prev_discrete_state).name}, "
+            f"x={output_data['x']:.4f}m,"
+        )
+    =}
+
+    # @label _handle_cmd
+    reaction(cmd) {=
+        command = cmd.value
+        self.current_cmd = command
+        self.logger.debug(f"Received command: {MonostableCylinderCmd(command).name}")
+    =}
+
+    # @label _handle_f_load
+    reaction(f_load) {=
+        self.current_f_load = f_load.value
+        self.logger.debug(f"Received external load: {self.current_f_load}N")
+    =}
+
+    # @label _physics_step
+    reaction(physics_tick) -> s, position, velocity, pressure {=
+        dt_sec = self.dt / 1e9
+        inputs = self.model.InputContainer({
+            "valve_cmd": self.current_cmd,
+            "F_load": self.current_f_load
+        })
+        # Compute next state
+        self.physics_state = self.model.next_state(
+            self.physics_state,
+            inputs,
+            dt_sec
+        )
+        output_data = self.model.output(self.physics_state)
+        current_discrete_state = int(output_data["retracting_state"])
+        position.set(output_data["x"])
+        velocity.set(output_data["v"])
+        pressure.set(output_data["P1"])
+        if current_discrete_state != self.prev_discrete_state:
+            self.logger.info(
+                f"State transition: "
+                f"{MonostableCylinderState(self.prev_discrete_state).name} -> "
+                f"{MonostableCylinderState(current_discrete_state).name} "
+                f"at x={output_data['x']:.4f}m"
+            )
+            s.set(current_discrete_state)
+            self.prev_discrete_state = current_discrete_state
+    =}
+}
