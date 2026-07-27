@@ -5,6 +5,9 @@ import Stack from "stack/Stack.lf"
 import Crane from "crane/Crane.lf"
 import Stamp from "stamp/Stamp.lf"
 import LSConveyor from "conveyor/LSConveyor.lf"
+import PAConveyor from "conveyor/PAConveyor.lf"
+import SSConveyor from "conveyor/SSConveyor.lf"
+import RFConveyor from "conveyor/RFConveyor.lf"
 
 preamble{=
 
@@ -142,6 +145,9 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
     crane = new Crane(name="xppu.crane")
     stamp = new Stamp(name="xppu.stamp")
     lsc = new LSConveyor(name="xppu.lsc")
+    pac = new PAConveyor(name="xppu.pac")
+    ss = new SSConveyor(name="xppu.ss")
+    rf = new RFConveyor(name="xppu.rf")
 
     stack.wp_at_pickup -> crane.wp_in_stack
     crane.wp_out_lsc -> lsc.wp_in_start
@@ -384,6 +390,8 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
     lsc.wp_out_ramp_mid -> lsc_wp_out_ramp_mid
     output lsc_wp_out_end
     lsc.wp_out_end -> lsc_wp_out_end
+    output rfc_wp_out_end
+    rf.wp_out_end -> rfc_wp_out_end
 
     reaction(lsc.wp_out_ramp_start, lsc.wp_out_ramp_mid, lsc.wp_out_pac, lsc.wp_out_end) {=
         if lsc.wp_out_ramp_start.is_present:
@@ -400,5 +408,29 @@ reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
             self.lsc_ramp_end_wp_count.value += 1
         self.lsc_wp_product_type.value = 0
         self.lsc_wp = None
+    =}
+
+    // @label forward_lsc_to_pac
+    reaction (lsc.wp_out_pac) -> pac.wp_in_start, pac.cmd {=
+        wp = lsc.wp_out_pac.value
+        self.logger.info(f"Forwarding WP {wp} from LSC to PAC")
+        pac.wp_in_start.set(wp)
+        pac.cmd.set(ConveyorCmd(wp, PACCmdType.T_TO_SSC))
+    =}
+
+    // @label forward_pac_to_ssc
+    reaction (pac.wp_out_end) -> ss.wp_in_start, ss.cmd {=
+        wp = pac.wp_out_end.value
+        self.logger.info(f"Forwarding WP {wp} from PAC to SSC")
+        ss.wp_in_start.set(wp)
+        ss.cmd.set(ConveyorCmd(wp, SSCCmdType.T_TO_RFC))
+    =}
+
+    // @label forward_ssc_to_rfc
+    reaction (ss.wp_out_rfc) -> rf.wp_in_start, rf.cmd {=
+        wp = ss.wp_out_rfc.value
+        self.logger.info(f"Forwarding WP {wp} from SSC to RFC")
+        rf.wp_in_start.set(wp)
+        rf.cmd.set(ConveyorCmd(wp, RFCCmdType.T_TO_LSC))
     =}
 }
