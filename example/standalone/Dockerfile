@@ -9,7 +9,7 @@ COPY src /opt/xppu-frost/example/standalone/src
 RUN lfc src/Main.lf
 
 # Runtime image
-FROM python:3.13-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 COPY --from=builder /venv /venv
 COPY --from=builder /opt/xppu-frost/example/standalone/src-gen /opt/xppu-frost/example/standalone/src-gen
