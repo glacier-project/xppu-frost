@@ -13,7 +13,7 @@ preamble{=
 import uuid
 from material import SteelMaterial, PlasticMaterial
 
-logger = logging.getLogger("test_rfconveyor")
+logger = logging.getLogger("test_paconveyor")
 logger.setLevel(logging.DEBUG)
 wps = [
     (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
@@ -40,6 +40,7 @@ main reactor TestPAConveyor {
     state c_wps_received = []
     state pac_ps_wp_detected
     state pac_mc_state
+    state observed_mc_states = {= set() =}
 
     logical action set_cmd
     timer add_wps(0 ms, 300 ms)
@@ -48,7 +49,7 @@ main reactor TestPAConveyor {
         ref_x=0.255, # m
         ref_y=0.45, # m
         c_angle=0, # radians
-        length=0.60, # mchat
+        length=0.60, # m
         width=0.055, # m
         speed=0.185 # m/s
     )
@@ -61,7 +62,7 @@ main reactor TestPAConveyor {
         self.wp_index += 1
         c.wp_in_start.set(wp)
         c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
-        logger.debug(f"Added WP {wp} to RFConveyor with command {wp_cmd_type}")
+        logger.debug(f"Added WP {wp} to PAConveyor with command {wp_cmd_type}")
     =}
 
     reaction (set_cmd) -> c.cmd{=
@@ -71,6 +72,7 @@ main reactor TestPAConveyor {
     reaction(c.ps_start_wp_detected, c.mc_guard_state) -> set_cmd{=
         if c.mc_guard_state.is_present:
             self.pac_mc_state = c.mc_guard_state.value
+            self.observed_mc_states.add(c.mc_guard_state.value)
         if c.ps_start_wp_detected.is_present:
             self.pac_ps_wp_detected = c.ps_start_wp_detected.value
 
@@ -79,6 +81,8 @@ main reactor TestPAConveyor {
             wp = self.pac_ps_wp_detected
             logger.info(f"WP {wp} detected at PS_START, retracting MC Guard")
             set_cmd.schedule(MSECS(0), ConveyorCmd(wp, PACCmdType.T_TO_SSC))
+            # Clear so a stale detection doesn't re-trigger on later state updates
+            self.pac_ps_wp_detected = None
     =}
 
     reaction (c.wp_out_end) -> set_cmd{=
@@ -92,6 +96,15 @@ main reactor TestPAConveyor {
             expected_wp, _ = self.wps[i]
             received_wp, _ = self.c_wps_received[i]
             assert expected_wp == received_wp, f"WP mismatch at index {i}: expected {expected_wp}, got {received_wp}"
+
+        # The WPs only reach the end by passing the MC guard, which means the
+        # guard must have actually retracted (to let them through) and extended
+        # (to block/re-arm). If it never cycled, the WPs sailed through and the
+        # test would not be exercising the guard logic at all.
+        assert MonostableCylinderState.RETRACTED in self.observed_mc_states, \
+            f"MC guard never retracted; observed states: {self.observed_mc_states}"
+        assert MonostableCylinderState.EXTENDED in self.observed_mc_states, \
+            f"MC guard never extended; observed states: {self.observed_mc_states}"
 
         if PYGAME_MANAGER:
             stop_pygame_event_loop()

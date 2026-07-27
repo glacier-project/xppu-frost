@@ -18,7 +18,17 @@ main reactor TestConveyor {
 
     timer add_wps(0 ms, 100 ms)
 
-    state wps = {=
+    // Each conveyor gets its OWN workpiece instances. The two conveyors mutate
+    // each WP's shape every tick, so sharing a single instance across both would
+    // let them corrupt each other's positions (nondeterministically, under the
+    // multi-threaded runtime).
+    state wps_forward = {=
+        [
+            SteelMaterial(id=str(uuid.uuid4())),
+            PlasticMaterial(id=str(uuid.uuid4()))
+        ]
+    =}
+    state wps_reverse = {=
         [
             SteelMaterial(id=str(uuid.uuid4())),
             PlasticMaterial(id=str(uuid.uuid4()))
@@ -33,14 +43,15 @@ main reactor TestConveyor {
     c_reverse = new Conveyor(name="conveyor_reverse")
 
     reaction (add_wps) -> c.wp_in_start, c_reverse.wp_in_end {=
-        if self.wp_index >= len(self.wps):
+        if self.wp_index >= len(self.wps_forward):
             return 0 # No more WPs to add
 
-        wp = self.wps[self.wp_index]
+        fwd_wp = self.wps_forward[self.wp_index]
+        rev_wp = self.wps_reverse[self.wp_index]
         self.wp_index += 1
-        c.wp_in_start.set(wp)
-        c_reverse.wp_in_end.set(wp)
-        logger.debug(f"Added WP {wp} to conveyors")
+        c.wp_in_start.set(fwd_wp)
+        c_reverse.wp_in_end.set(rev_wp)
+        logger.debug(f"Added WPs {fwd_wp} (forward) / {rev_wp} (reverse) to conveyors")
     =}
 
     reaction (c.wp_out_end, c_reverse.wp_out_start) {=
@@ -53,7 +64,7 @@ main reactor TestConveyor {
     =}
 
     reaction (shutdown) {=
-        assert self.c_wps_received == self.wps, f"Expected WPs {self.wps}, but received {self.c_wps_received}"
-        assert self.c_reverse_wps_received == self.wps, f"Expected WPs {self.wps}, but received {self.c_reverse_wps_received}"
+        assert self.c_wps_received == self.wps_forward, f"Expected WPs {self.wps_forward}, but received {self.c_wps_received}"
+        assert self.c_reverse_wps_received == self.wps_reverse, f"Expected WPs {self.wps_reverse}, but received {self.c_reverse_wps_received}"
     =}
 }
