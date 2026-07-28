@@ -51,6 +51,10 @@ stack_buffer = [
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
+
+# The conveyor reactors render themselves through this manager when it is set;
+# None disables rendering (same convention as the test suite).
+PYGAME_MANAGER = None
 =}
 
 reactor KafkaProducer extends FrostReactor {
@@ -292,8 +296,10 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 
         # Add here the request of the new workpiece if needed
 
-        for task, machine in start_tasks.value:
-            machine = machine.name
+        # next_ready_tasks() yields (ScheduledTask, machine id); the Machine
+        # object itself hangs off the scheduled task.
+        for task, machine_id in start_tasks.value:
+            machine = task.machine.name
             task_name = task.task.name
             self.logger.info(f"Starting task {task_name} on machine {machine}")
             task.start_time = self._get_current_logical_time_sec()
