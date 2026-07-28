@@ -89,10 +89,10 @@ reactors:
               _extension_speed: 531.25   # m/s
               _extension_length: 0.085   # m
               _is_retracted: true        # initial state
-  frost_bus:
+  frost_link:
     logging_level: WARNING
     parameters:
-      data_model_path: ../../resources/data_model/bus.yml
+      data_model_path: ../../resources/data_model/link.yml
   xppu_scheduler:
     logging_level: INFO
     parameters:
@@ -101,3 +101,5 @@ reactors:
       recipe_template: resources/template/sc14_recipe.json
   kafka_producer:
     logging_level: WARNING
+    parameters:
+      data_model_path: resources/data_model/kafka_producer.yml

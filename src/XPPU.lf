@@ -1,6 +1,6 @@
 target Python;
 
-import FrostMachine from "../frost/src/lib/FrostMachine.lf"
+import FrostReactor from "../frost/src/lib/FrostReactor.lf"
 import Stack from "stack/Stack.lf"
 import Crane from "crane/Crane.lf"
 import Stamp from "stamp/Stamp.lf"
@@ -89,7 +89,7 @@ XPPU_DATA_MODEL_NODES = [
 ]
 =}
 
-reactor XPPU(stack_buffer = {= [] =}) extends FrostMachine{
+reactor XPPU(stack_buffer = {= [] =}) extends FrostReactor{
 
     # Cmds variables
     state stack_cmd
