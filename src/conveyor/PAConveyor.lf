@@ -2,16 +2,19 @@ target Python{
     files: [
         "../python-lib/conveyor.py",
         "../python-lib/pac.py",
+        "../python-lib/pa.py",
         "../python-lib/f_compare.py",
         "../python-lib/shape.py",
         "../python-lib/material.py",
         "../python-lib/monostable_cylinder.py",
         "../python-lib/guard.py",
+        "../python-lib/area_trigger.py",
     ]
 }
 
 import MonostableCylinder from "../common/MonostableCylinder.lf"
 import Conveyor from "Conveyor.lf"
+import PA from "PA.lf"
 
 preamble{=
 from frost import *
@@ -20,10 +23,12 @@ from f_compare import cos, sin
 from shape import ConveyorBeltShape, Point, ComponentShape
 from material import Material, MATERIAL_WIDTH, MaterialType
 from position_sensor import PositionSensor
+from area_trigger import AreaTrigger, AreaCondition
 from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
 from guard import Guard
 from conveyor import ConveyorCmd
-from pac import PACCmdType
+from pa import PACmd, PACmdType, PAPos
+from pac import PACCmdType, PICK_CMD_BY_POS, PUTDOWN_CMD_BY_POS, POS_BY_PICK_CMD, POS_BY_PUTDOWN_CMD
 =}
 
 reactor PAConveyor extends Conveyor{
@@ -35,6 +40,23 @@ reactor PAConveyor extends Conveyor{
         MC_GUARD_OFFSET = 0.15 # lock
         MC_GUARD_WIDTH = 0.01
         MC_GUARD_LENGTH = 0.055
+        # Offsets of the four PA working positions along the belt. POS2 ends
+        # exactly where the MC guard starts, so a WP held by the guard is
+        # already sitting in the POS2 area.
+        PA_POS_OFFSETS = {
+            PAPos.POS1: 0.055,
+            PAPos.POS2: 0.095,
+            PAPos.POS3: 0.26,
+            PAPos.POS4: 0.475,
+        }
+        PA_POS_WIDTH = 0.055
+        PA_POS_LENGTH = 0.055
+        # Positions downstream of the MC guard: a WP commanded to one of these
+        # has to be let through the guard first.
+        PA_POS_BEHIND_GUARD = [PAPos.POS3, PAPos.POS4]
+        # Action name used by all PA area triggers; which position and whether
+        # it is a pick or a putdown is derived from the WP's active command.
+        PA_TRANSFER_ACTION = "pa_transfer"
     =}
 
     state _guard_switch_delay
@@ -45,9 +67,29 @@ reactor PAConveyor extends Conveyor{
     state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
     state mc_guard_wp
 
+    state _pa_areas = {= { pos: self._conveyor_shape.get_sensor_shape(offset, self.PA_POS_WIDTH, self.PA_POS_LENGTH) for pos, offset in self.PA_POS_OFFSETS.items() } =}
+    # Position the arm is currently at, None until it has moved for the first time.
+    state _pa_pos
+    # Position the arm should travel to, from the most recent pick/putdown command.
+    state _pa_desired_pos
+    # True while a command sent to the arm is still outstanding.
+    state _pa_busy = False
+    # Transfer waiting to be executed once the arm is in place.
+    state _pa_pending_transfer
+    # WP currently held by the arm.
+    state _pa_wp
+
     logical action extend_mc
+    # Every command to the arm goes through this action. Writing pa.cmd directly
+    # from the reactions that read the arm's outputs would close a causality
+    # loop; the microstep delay breaks it.
+    logical action pa_dispatch
     output mc_guard_state
     output ps_start_wp_detected
+    output pa_position
+    output pa_mc_state
+    output pa_wp_picked
+    output pa_wp_released
 
     mc_guard = new MonostableCylinder(
         name={=self.name + ".mc_guard"=},
@@ -57,6 +99,71 @@ reactor PAConveyor extends Conveyor{
         is_retracted=False
     )
     mc_guard.s -> mc_guard_state
+
+    pa = new PA(name={=self.name + ".pa"=})
+    pa.position -> pa_position
+    pa.mc_state -> pa_mc_state
+    pa.wp_picked -> pa_wp_picked
+    pa.wp_released -> pa_wp_released
+
+    method get_transfer_pos(cmd){=
+        """Returns the PA position a conveyor command refers to, or None if the
+        command does not involve the arm.
+
+        Args:
+            cmd (ConveyorCmd): The command to inspect.
+        """
+        if cmd is None:
+            return None
+
+        cmd_type = cmd.cmd_type
+        if cmd_type in POS_BY_PICK_CMD:
+            return POS_BY_PICK_CMD[cmd_type]
+        return POS_BY_PUTDOWN_CMD.get(cmd_type)
+    =}
+
+    method dispatch_pa(pa_cmd_evt, pa_wp_in_evt){=
+        """Drives the arm towards whatever it should be doing next: travel to
+        the position it is needed at, then run the pending transfer once it has
+        arrived. Called whenever something that feeds this decision changes, so
+        a transfer requested while the arm is still travelling is retried on
+        arrival rather than dropped.
+
+        Args:
+            pa_cmd_evt (event): Event to send commands to the arm.
+            pa_wp_in_evt (event): Event announcing a WP to the arm.
+        """
+        if self._pa_busy:
+            return
+
+        transfer = self._pa_pending_transfer
+        target = self.get_transfer_pos(transfer)
+        if target is None:
+            target = self._pa_desired_pos
+
+        if target is None:
+            return
+
+        if self._pa_pos != target:
+            self.logger.info(f"Sending PA to {target}")
+            pa_cmd_evt.set(PACmd(PACmdType.MOVE_TO_POS, target))
+            self._pa_busy = True
+            return
+
+        if transfer is None:
+            return
+
+        wp = transfer.wp
+        if transfer.cmd_type in POS_BY_PICK_CMD:
+            self.logger.info(f"Commanding PA to pick WP {wp} from {target}")
+            pa_wp_in_evt.set((target, wp))
+            pa_cmd_evt.set(PACmd(PACmdType.PICKUP_FROM_POS, target))
+        else:
+            self.logger.info(f"Commanding PA to put WP {wp} down at {target}")
+            pa_cmd_evt.set(PACmd(PACmdType.PUTDOWN_TO_POS, target))
+
+        self._pa_busy = True
+    =}
 
     reaction (startup) {=
         # The time should be enough to let the WP pass the guard (dim guard + wp size + ps width)
@@ -79,6 +186,36 @@ reactor PAConveyor extends Conveyor{
             target_action="remove_to_ps_start_cmd",
             delay=0
         )
+
+        # POS3 and POS4 sit downstream of the MC guard, so a WP to be picked
+        # from there has to be let through the guard just like one travelling to
+        # the end of the belt.
+        for pos in self.PA_POS_BEHIND_GUARD:
+            self.register_position_sensor_trigger(
+                sensor=self._position_sensor_start,
+                triggering_cmd=PICK_CMD_BY_POS[pos],
+                target_action="disable_mc_guard",
+                delay=0
+            )
+
+        # Add PA area triggers: a pick starts once the WP is fully inside its
+        # position, a putdown once that position is free of other WPs.
+        for pos, area in self._pa_areas.items():
+            self.register_area_trigger(
+                area=area,
+                triggering_cmd=PICK_CMD_BY_POS[pos],
+                target_action=self.PA_TRANSFER_ACTION,
+                condition=AreaCondition.WP_INSIDE,
+                delay=0
+            )
+            self.register_area_trigger(
+                area=area,
+                triggering_cmd=PUTDOWN_CMD_BY_POS[pos],
+                target_action=self.PA_TRANSFER_ACTION,
+                condition=AreaCondition.AREA_CLEAR,
+                delay=0
+            )
+
         self.add_guard(self._mc_guard)
 
 
@@ -86,6 +223,23 @@ reactor PAConveyor extends Conveyor{
             PYGAME_MANAGER.add_static_element(self._position_sensor_start.working_area)
             PYGAME_MANAGER.add_static_element(self._position_sensor_end.working_area)
             PYGAME_MANAGER.add_static_element(self._mc_guard_area)
+            for pos, area in self._pa_areas.items():
+                PYGAME_MANAGER.add_static_element(area, pos.value)
+    =}
+
+    // @label handle_pa_cmd
+    reaction (cmd) -> pa_dispatch{=
+        target = self.get_transfer_pos(cmd.value)
+        if target is None:
+            return 0
+
+        self._pa_desired_pos = target
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label dispatch_pa_cmd
+    reaction (pa_dispatch) -> pa.cmd, pa.wp_in{=
+        self.dispatch_pa(pa.cmd, pa.wp_in)
     =}
 
     // @label handle_ps_actions
@@ -103,6 +257,78 @@ reactor PAConveyor extends Conveyor{
             self.logger.warning(f"Clearing T_TO_PS_START command for WP {wp}")
             self.clear_cmd(wp, PACCmdType.T_TO_PS_START)
             ps_start_wp_detected.set(wp)
+    =}
+
+    // @label handle_pa_area_actions
+    reaction (trigger_area_action) -> pa_dispatch{=
+        action, wp = trigger_area_action.value
+
+        if action != self.PA_TRANSFER_ACTION:
+            return 0
+
+        cmd = self._active_cmds.get(wp)
+        if cmd is None:
+            # The command was cleared between detection and this microstep.
+            return 0
+
+        self.logger.info(f"PA transfer triggered for WP {wp} by command {cmd.cmd_type}")
+
+        # The belt must stand still for the whole transfer, both so the WP does
+        # not drift out from under the gripper and so a putdown target stays free.
+        self.hold()
+        self._pa_pending_transfer = cmd
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label handle_pa_position
+    reaction (pa.position) -> pa_dispatch{=
+        self._pa_pos = pa.position.value
+        self._pa_busy = False
+        self.logger.debug(f"PA reached {self._pa_pos}")
+
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label handle_pa_wp_out
+    reaction (pa.wp_out){=
+        position, wp = pa.wp_out.value
+        area = self._pa_areas[position]
+
+        assert self._hold, f"Belt must be held while the PA puts WP {wp} down at {position}"
+        for other in self._wps:
+            assert not area.intersects(other.shape), f"PA position {position} is occupied by WP {other}"
+
+        centroid_pos = area.centroid_pos
+        wp.shape.translate_to(x=centroid_pos.x, y=centroid_pos.y)
+        self.logger.debug(f"Placed WP {wp} at {position} ({centroid_pos})")
+    =}
+
+    // @label handle_pa_transfer_end
+    reaction (pa.wp_picked, pa.wp_released) -> pa_dispatch{=
+        if pa.wp_picked.is_present:
+            wp = pa.wp_picked.value
+            position = self.get_transfer_pos(self._active_cmds.get(wp))
+
+            # The belt was held for the whole transfer, so the WP must still be
+            # where it was detected.
+            assert position is not None, f"No active pick command for WP {wp}"
+            assert self._pa_areas[position].contains(wp.shape), f"WP {wp} drifted out of {position} during pickup"
+
+            self._wps.remove(wp)
+            self._pa_wp = wp
+            self.logger.info(f"PA picked up WP {wp} from {position}")
+        else:
+            wp = pa.wp_released.value
+            self.insert_wp(wp)
+            self._pa_wp = None
+            self.logger.info(f"PA released WP {wp}")
+
+        self._pa_busy = False
+        self._pa_pending_transfer = None
+        self.remove_cmd(wp)
+        self.release()
+
+        pa_dispatch.schedule(0)
     =}
 
     reaction (extend_mc) -> mc_guard.cmd{=

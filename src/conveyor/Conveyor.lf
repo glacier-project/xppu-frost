@@ -5,6 +5,7 @@ target Python{
         "../python-lib/shape.py",
         "../python-lib/material.py",
         "../python-lib/position_sensor.py",
+        "../python-lib/area_trigger.py",
     ]
 }
 
@@ -17,6 +18,7 @@ from f_compare import cos, sin
 from shape import ConveyorBeltShape, Point, ComponentShape
 from material import Material, MaterialType
 from position_sensor import PositionSensor
+from area_trigger import AreaTrigger, AreaCondition
 from conveyor import ConveyorCmd
 =}
 
@@ -39,14 +41,19 @@ reactor Conveyor(
 
     timer tick(tick_interval, tick_interval)
     logical action trigger_ps_action
+    logical action trigger_area_action
 
     state _wps = []
     state _is_on = False
+    # Suspends belt movement without touching _is_on, which is derived from the
+    # active commands and would be reset by any incoming command.
+    state _hold = False
     state _cos_c_angle = {= cos(self.c_angle, 1e-5) =}
     state _sin_c_angle = {= sin(self.c_angle, 1e-5) =}
     state _conveyor_shape = {= ConveyorBeltShape(centroid_pos=Point(self.ref_x+self.length/2, self.ref_y+self.width/2, 0), base=self.length, height=self.width, angle=self.c_angle) =}
     state _guards = []
     state _ps_triggers = []
+    state _area_triggers = []
     state _active_cmds = {= {  } =}
 
     method add_guard(guard){=
@@ -72,6 +79,46 @@ reactor Conveyor(
             delay (int): Time delay in ns after detection to schedule the action.
         """
         self._ps_triggers.append((sensor, triggering_cmd, target_action, delay))
+    =}
+
+    method register_area_trigger(area, triggering_cmd, target_action, condition, delay){=
+        """
+        Registers a rule that triggers an action when a workpiece's relation to
+        a fixed area of the belt satisfies `condition` while a specific command
+        is active.
+
+        Unlike a position sensor trigger, this can also fire while the belt is
+        held, which is what lets a component act on a stopped conveyor.
+
+        Args:
+            area (Shape): Area of the conveyor to monitor.
+            triggering_cmd (ConveyorCmd): Command that must be active for the trigger to fire.
+            condition (AreaCondition): WP_INSIDE (commanded WP fully within the
+                area) or AREA_CLEAR (no WP on the belt touches the area).
+            target_action (str): Action to schedule when triggered.
+            delay (int): Time delay in ns after detection to schedule the action.
+        """
+        trigger = AreaTrigger(
+            name=f"{target_action}",
+            area=area,
+            triggering_cmd=triggering_cmd,
+            target_action=target_action,
+            condition=condition,
+            delay=delay
+        )
+        self._area_triggers.append(trigger)
+    =}
+
+    method hold(){=
+        """Suspends belt movement, leaving the active commands untouched."""
+        self.logger.debug("Holding conveyor")
+        self._hold = True
+    =}
+
+    method release(){=
+        """Resumes belt movement after a hold()."""
+        self.logger.debug("Releasing conveyor")
+        self._hold = False
     =}
 
     method handle_mc_state_update(mc_state, mc_guard, cmd_type, expected_wp, mc_cmd_evt, wp_out_evt){=
@@ -203,8 +250,8 @@ reactor Conveyor(
     =}
 
     // @label update_wps_position
-    reaction (tick) -> wp_out_end, wp_out_start, trigger_ps_action {=
-        if not self._is_on or self.speed == 0:
+    reaction (tick) -> wp_out_end, wp_out_start {=
+        if not self._is_on or self.speed == 0 or self._hold:
             return 0
 
         dx = self._cos_c_angle * (self.speed * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS))
@@ -251,7 +298,15 @@ reactor Conveyor(
                 # remove WP
                 self.remove_wp(wp, wp_out)
                 self.logger.debug(f"WP {wp} exited conveyor at position {shape.centroid_pos}")
+    =}
 
+    // @label evaluate_triggers
+    // Kept separate from update_wps_position so triggers are still evaluated
+    // while the belt is held: an AREA_CLEAR trigger has to fire precisely when
+    // nothing is moving. This is a no-op for a stopped conveyor with no active
+    // commands, since _is_on is exactly len(_active_cmds) > 0 and every trigger
+    // filters on the active commands.
+    reaction (tick) -> trigger_ps_action, trigger_area_action {=
         # Check position sensor triggers
         for sensor, triggering_cmd, target_action, delay in self._ps_triggers:
             cmds = [cmd for cmd in self._active_cmds.values() if cmd.cmd_type == triggering_cmd]
@@ -264,5 +319,15 @@ reactor Conveyor(
             if len(wp) != 0:
                 self.logger.info(f"Position sensor {sensor.name} detected WP {wp[0]} for command {triggering_cmd}, scheduling action.")
                 trigger_ps_action.schedule(delay, (target_action, wp[0]))
+
+        # Check area triggers
+        for trigger in self._area_triggers:
+            cmds = [cmd for cmd in self._active_cmds.values() if cmd.cmd_type == trigger.triggering_cmd]
+
+            wp = [cmd.wp for cmd in cmds if trigger.is_triggered(cmd.wp, self._wps)]
+
+            if len(wp) != 0:
+                self.logger.info(f"Area trigger {trigger} fired for WP {wp[0]}, scheduling action {trigger.target_action}.")
+                trigger_area_action.schedule(trigger.delay, (trigger.target_action, wp[0]))
     =}
 }

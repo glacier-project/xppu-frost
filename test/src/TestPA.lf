@@ -1,0 +1,132 @@
+target Python{
+    fast: true,
+    timeout: 5 s,
+    single-threaded: false,
+}
+
+import PA from "../../src/conveyor/PA.lf";
+
+preamble{=
+import logging
+import uuid
+from material import SteelMaterial
+
+logger = logging.getLogger("test_pa")
+logger.setLevel(logging.DEBUG)
+
+# Axis travel times implied by the PA defaults (speed 0.2 m/s, home at 0 m):
+#   home -> POS2 : 0.0625 m            -> 312.5 ms
+#   POS2 -> POS3 : 0.2225 - 0.0625 m   -> 800 ms
+MOVE_TO_POS2_NS = 312_500_000
+MOVE_TO_POS3_NS = 800_000_000
+=}
+
+/**
+ * Drives the PA through a full transfer on its own: travel, pick up a WP,
+ * travel again, put it back down. Each step is issued only once the previous
+ * one has reported completion, so the assertions also pin down the ordering of
+ * the arm's outputs.
+ */
+main reactor TestPA {
+    state wp = {= SteelMaterial(id=str(uuid.uuid4())) =}
+    state step = 0
+    state step_start = 0
+    state positions_reached = []
+    state picked_wp
+    state released_wp
+    state wp_out_value
+
+    // Commands are issued from this action rather than straight from the
+    // reactions that observe the arm, which would close a causality loop.
+    logical action next_step
+
+    pa = new PA(name="pa")
+
+    reaction (startup) -> next_step {=
+        next_step.schedule(0)
+    =}
+
+    reaction (next_step) -> pa.cmd, pa.wp_in {=
+        self.step_start = lf.time.logical_elapsed()
+        step = self.step
+
+        if step == 0:
+            pa.cmd.set(PACmd(PACmdType.MOVE_TO_POS, PAPos.POS2))
+        elif step == 1:
+            # The arm has to be told what is waiting at the position before it
+            # can be asked to grab it.
+            pa.wp_in.set((PAPos.POS2, self.wp))
+            pa.cmd.set(PACmd(PACmdType.PICKUP_FROM_POS, PAPos.POS2))
+        elif step == 2:
+            pa.cmd.set(PACmd(PACmdType.MOVE_TO_POS, PAPos.POS3))
+        elif step == 3:
+            pa.cmd.set(PACmd(PACmdType.PUTDOWN_TO_POS, PAPos.POS3))
+        else:
+            logger.info("All steps issued")
+    =}
+
+    reaction (pa.position) -> next_step {=
+        pos = pa.position.value
+        elapsed = lf.time.logical_elapsed() - self.step_start
+        self.positions_reached.append(pos)
+
+        if self.step == 0:
+            assert pos == PAPos.POS2, f"Expected POS2, got {pos}"
+            expected = MOVE_TO_POS2_NS
+        else:
+            assert self.step == 2, f"Unexpected position update at step {self.step}"
+            assert pos == PAPos.POS3, f"Expected POS3, got {pos}"
+            expected = MOVE_TO_POS3_NS
+
+        assert abs(elapsed - expected) <= MSECS(1), \
+            f"Travel to {pos} took {elapsed} ns, expected {expected} ns"
+        logger.info(f"Reached {pos} in {elapsed} ns")
+
+        self.step += 1
+        next_step.schedule(0)
+    =}
+
+    reaction (pa.wp_picked) -> next_step {=
+        assert self.step == 1, f"Unexpected pickup at step {self.step}"
+
+        self.picked_wp = pa.wp_picked.value
+        assert self.picked_wp == self.wp, f"Picked {self.picked_wp}, expected {self.wp}"
+        logger.info(f"Picked WP after {lf.time.logical_elapsed() - self.step_start} ns")
+
+        self.step += 1
+        next_step.schedule(0)
+    =}
+
+    reaction (pa.wp_out) {=
+        position, wp = pa.wp_out.value
+
+        assert self.step == 3, f"Unexpected wp_out at step {self.step}"
+        assert position == PAPos.POS3, f"Expected wp_out at POS3, got {position}"
+        assert wp == self.wp, f"wp_out carried {wp}, expected {self.wp}"
+
+        self.wp_out_value = pa.wp_out.value
+        logger.info(f"WP handed over at {position}")
+    =}
+
+    reaction (pa.wp_released) -> next_step {=
+        assert self.step == 3, f"Unexpected release at step {self.step}"
+        # wp_out is emitted while the gripper is still down; the release only
+        # follows once it has lifted again.
+        assert self.wp_out_value is not None, "wp_out must precede wp_released"
+
+        self.released_wp = pa.wp_released.value
+        assert self.released_wp == self.wp, f"Released {self.released_wp}, expected {self.wp}"
+
+        self.step += 1
+        next_step.schedule(0)
+    =}
+
+    reaction (shutdown) {=
+        assert self.step == 4, f"Only {self.step} of 4 steps completed"
+        assert self.positions_reached == [PAPos.POS2, PAPos.POS3], \
+            f"Unexpected position sequence: {self.positions_reached}"
+        assert self.picked_wp is not None, "PA never reported a pickup"
+        assert self.wp_out_value is not None, "PA never handed the WP over"
+        assert self.released_wp is not None, "PA never reported a release"
+    =}
+}
