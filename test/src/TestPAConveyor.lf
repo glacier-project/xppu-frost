@@ -1,0 +1,112 @@
+target Python{
+    fast: true,
+    timeout: 15 s,
+    single-threaded: false,
+    files: [
+        "../src/python-lib/viewer.py",
+    ]
+}
+
+import PAConveyor from "../../src/conveyor/PAConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_paconveyor")
+logger.setLevel(logging.DEBUG)
+wps = [
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+    (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+    (SteelMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+    (PlasticMaterial(id=str(uuid.uuid4())), PACCmdType.T_TO_PS_START),
+]
+PYGAME_MANAGER = None
+
+# # Starts the pygame mng
+# from viewer import run_pygame_event_loop_in_thread, stop_pygame_event_loop, get_pygame_manager, initialize_pygame_manager
+# initialize_pygame_manager(width=1200, height=600, fps=30)
+# PYGAME_MANAGER = get_pygame_manager()
+# run_pygame_event_loop_in_thread()
+# for wp in wps:
+#     PYGAME_MANAGER.add_dynamic_element(wp[0].shape, wp[0].id[-4:] )
+=}
+
+main reactor TestPAConveyor {
+    state wp_index = 0
+    state wps = {=
+        wps
+    =}
+    state c_wps_received = []
+    state pac_ps_wp_detected
+    state pac_mc_state
+    state observed_mc_states = {= set() =}
+
+    logical action set_cmd
+    timer add_wps(0 ms, 300 ms)
+
+    c = new PAConveyor(name="pac",
+        ref_x=0.255, # m
+        ref_y=0.45, # m
+        c_angle=0, # radians
+        length=0.60, # m
+        width=0.055, # m
+        speed=0.185 # m/s
+    )
+
+    reaction (add_wps) -> c.wp_in_start, c.cmd{=
+        if self.wp_index >= len(self.wps):
+            return 0 # No more WPs to add
+
+        wp, wp_cmd_type = self.wps[self.wp_index]
+        self.wp_index += 1
+        c.wp_in_start.set(wp)
+        c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
+        logger.debug(f"Added WP {wp} to PAConveyor with command {wp_cmd_type}")
+    =}
+
+    reaction (set_cmd) -> c.cmd{=
+        c.cmd.set(set_cmd.value)
+    =}
+
+    reaction(c.ps_start_wp_detected, c.mc_guard_state) -> set_cmd{=
+        if c.mc_guard_state.is_present:
+            self.pac_mc_state = c.mc_guard_state.value
+            self.observed_mc_states.add(c.mc_guard_state.value)
+        if c.ps_start_wp_detected.is_present:
+            self.pac_ps_wp_detected = c.ps_start_wp_detected.value
+
+        # If WP detected at PS_START, and the MC Guard is extended, retract it
+        if self.pac_mc_state == MonostableCylinderState.EXTENDED and self.pac_ps_wp_detected:
+            wp = self.pac_ps_wp_detected
+            logger.info(f"WP {wp} detected at PS_START, retracting MC Guard")
+            set_cmd.schedule(MSECS(0), ConveyorCmd(wp, PACCmdType.T_TO_SSC))
+            # Clear so a stale detection doesn't re-trigger on later state updates
+            self.pac_ps_wp_detected = None
+    =}
+
+    reaction (c.wp_out_end) -> set_cmd{=
+        logger.debug(f"Received WP {c.wp_out_end.value} from end")
+        self.c_wps_received.append((c.wp_out_end.value, PACCmdType.T_TO_SSC))
+    =}
+
+    reaction (shutdown) {=
+        assert len(self.c_wps_received) == len(self.wps), f"Expected {len(self.wps)} WPs received, got {len(self.c_wps_received)}"
+        for i in range(len(self.wps)):
+            expected_wp, _ = self.wps[i]
+            received_wp, _ = self.c_wps_received[i]
+            assert expected_wp == received_wp, f"WP mismatch at index {i}: expected {expected_wp}, got {received_wp}"
+
+        # The WPs only reach the end by passing the MC guard, which means the
+        # guard must have actually retracted (to let them through) and extended
+        # (to block/re-arm). If it never cycled, the WPs sailed through and the
+        # test would not be exercising the guard logic at all.
+        assert MonostableCylinderState.RETRACTED in self.observed_mc_states, \
+            f"MC guard never retracted; observed states: {self.observed_mc_states}"
+        assert MonostableCylinderState.EXTENDED in self.observed_mc_states, \
+            f"MC guard never extended; observed states: {self.observed_mc_states}"
+
+        if PYGAME_MANAGER:
+            stop_pygame_event_loop()
+    =}
+}

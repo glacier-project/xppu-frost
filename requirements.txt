@@ -3,3 +3,6 @@ shapely==2.1.2
 numpy==2.3.4
 git+https://github.com/glacier-project/machine-data-model.git@dev
 git+https://github.com/glacier-project/frost-planner.git@develop
+pygame==2.6.1
+progpy==1.7.1
+fmpy>=0.3.26

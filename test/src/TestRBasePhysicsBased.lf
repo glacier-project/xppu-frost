@@ -1,0 +1,87 @@
+target Python{
+    fast: true,
+    timeout: 30 s
+}
+
+import RBasePhysicsBased from "../../src/crane/RBasePhysicsBased.lf"
+
+preamble{=
+import uuid
+import numpy as np
+from frost import *
+from copy import deepcopy
+
+epsilon = MSECS(1)  # Allowable timing error of 1ms
+ANGLE_POS_S=np.pi
+ANGLE_POS_LSC=(3/2)*np.pi
+ANGLE_POS_ST=0
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
+logger = logging.getLogger("test_rbase")
+logger.setLevel(logging.DEBUG)
+=}
+
+main reactor {
+
+    state expected_positions = []
+    logical action send_cmd
+
+    r_base = new RBasePhysicsBased(
+        name="r_base",
+        dpos_dict={=crane_dpos=},
+        dt=1 ms,
+        mass_load=0.400,
+        radius_load=0.10,
+        m_crane=0.500,
+        L_arm=0.15,
+        Kp=15.0,
+        Ki=1.0,
+        Kd=5.0,
+        max_velocity=1.5708, # 90 deg/s
+        accuracy=0.04,
+        initial_theta=0.0
+    )
+
+    reaction (startup) -> send_cmd{=
+        self.expected_positions = [
+            (CranePos.POS_S, MSECS(4500)),    # Rotate to S in ~4.5s
+            (CranePos.POS_LSC, MSECS(6750)),  # Rotate to LSC in ~2.25s
+            (CranePos.POS_ST, MSECS(9000)),   # Rotate to ST in ~2.25
+            (CranePos.POS_LSC, MSECS(11250)), # Rotate to LSC in ~2.25s
+            (CranePos.POS_ST, MSECS(13500)),  # Rotate to ST in ~2.25s
+            (CranePos.POS_S, MSECS(18000))    # Rotate to S in ~4.5s
+        ]
+
+        cmd_time = 0
+        for pos, end_time in self.expected_positions:
+            logger.debug(f"Scheduling r_base_cmd at {cmd_time} ns to position {pos}")
+            # small delay to ensure the command is processed after the previous position is reached
+            send_cmd.schedule(cmd_time + NSECS(200), pos)
+            cmd_time = end_time
+    =}
+
+    reaction (send_cmd) -> r_base.cmd{=
+        r_base.cmd.set(send_cmd.value)
+    =}
+
+    reaction (r_base.d_pos){=
+        logger.debug(f"RBase d_pos at time {lf.time.logical_elapsed()} ns: d_pos={r_base.d_pos.value}")
+
+        expected_pos, expected_time = self.expected_positions.pop(0)
+        current_time = lf.time.logical_elapsed()
+
+        assert expected_pos == r_base.d_pos.value, f"Expected position {expected_pos}, got {r_base.d_pos.value}"
+        logger.info(
+            f"Position {r_base.d_pos.value} reached at {current_time / 1e6:.1f} ms "
+            f"(expected ~{expected_time / 1e6:.1f} ms)"
+        )
+    =}
+
+    reaction (shutdown) {=
+        assert self.expected_positions == [], f"Not all expected positions were reached. Remaining: {[pos for pos, time in self.expected_positions]}"
+    =}
+}

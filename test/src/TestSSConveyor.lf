@@ -12,6 +12,7 @@ from material import SteelMaterial, PlasticMaterial
 
 logger = logging.getLogger("test_sscconveyor")
 logger.setLevel(logging.DEBUG)
+PYGAME_MANAGER = None
 =}
 
 main reactor TestSSConveyor {

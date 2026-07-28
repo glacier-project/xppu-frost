@@ -1,11 +1,12 @@
 from material import Material
-from shape import Shape
+from shape import Shape, GUARD_COLOR
 from shapely import Point
 
 class Guard:
 
     def __init__(self, name: str, guard_area:Shape, active: bool= False) -> None:
         self.name = name
+        guard_area.color = GUARD_COLOR
         self.guard_area = guard_area
         self._allowed_wp = {}
         self._active = active

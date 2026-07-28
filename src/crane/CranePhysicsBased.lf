@@ -1,0 +1,203 @@
+target Python{
+    files: [
+        "../python-lib/crane.py",
+        "../python-lib/material.py",
+        "../python-lib/shape.py",
+        "../python-lib/monostable_cylinder_physics_based.py",
+        "../python-lib/rbase_physics_based.py",
+    ]
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+import RBasePhysicsBased from "RBasePhysicsBased.lf";
+import MonostableCylinderPhysicsBased from "../common/MonostableCylinderPhysicBased.lf"
+
+preamble{=
+import numpy as np
+from crane import CraneCmd, CranePos
+from material import Material
+from shape import Point
+from monostable_cylinder_physics_based import (
+    MonostableCylinderCmd,
+    MonostableCylinderState
+)
+=}
+
+reactor CranePhysicsBased(
+    ref_x = 0.2275, # m
+    ref_y = 0.8275, # m
+    length = 0.105 # m
+) extends FrostBase{
+
+    input wp_in_stack
+    input wp_in_stamp
+    input wp_in_lsc
+    input cmd
+
+    output position
+    output angle
+    output current_wp
+    output wp_out_stack
+    output wp_out_stamp
+    output wp_out_lsc
+    output mc_state
+    mc.s -> mc_state;
+
+    state _wp_in_stack
+    state _wp_in_stamp
+    state _wp_in_lsc
+    state _wp
+    state _current_angle
+    state _current_postion
+    state _is_picking_up = False
+    state _is_putting_down = False
+
+    logical action deferred_mc_cmd
+
+    mc = new MonostableCylinderPhysicsBased(
+        name={= self.name + ".mc" =},
+        is_retracted=True,
+        dt = 1 ms,
+        L_max = 0.1,
+        valve_coefficient = 0.0001
+    )
+    r_base = new RBasePhysicsBased(
+        name={= self.name + ".r_base" =},
+        dpos_dict={=crane_dpos=},
+        dt=1 ms,
+        mass_load=0.40,
+        radius_load=0.10,
+        m_crane=0.500,
+        L_arm=0.15,
+        Kp=15.0,
+        Ki=1.0,
+        Kd=5.0,
+        max_velocity=1.5708, # 90 deg/s
+        accuracy=0.04,
+        initial_theta=0.0
+    )
+    r_base.d_pos -> position
+    r_base.angle -> angle
+
+    method set_wp_in(wp, wp_area){=
+        """
+        Sets the workpiece in the specified area.
+
+        Args:
+            wp (Material): The workpiece to set.
+            wp_area (str): The area to set the workpiece in. Must be one of "stack", "stamp", or "lsc".
+        """
+        if not isinstance(wp, Material):
+            raise ValueError(f"Input wp must be of type Material, got {type(material)} in {wp_area} wp_area.")
+        setattr(self, f"_wp_in_{wp_area}", wp)
+    =}
+
+    // @label handle_wp_in
+    reaction (wp_in_stack, wp_in_stamp, wp_in_lsc){=
+        if wp_in_stack.is_present:
+            self.set_wp_in(wp_in_stack.value, "stack")
+        if wp_in_stamp.is_present:
+            self.set_wp_in(wp_in_stamp.value, "stamp")
+        if wp_in_lsc.is_present:
+            self.set_wp_in(wp_in_lsc.value, "lsc")
+    =}
+
+    // @label handle_cmd
+    reaction (cmd) -> r_base.cmd, mc.cmd{=
+        cmd = cmd.value
+
+        if cmd == CraneCmd.ROTATE_S:
+            self.logger.info("Setting crane to POS_S")
+            r_base.cmd.set(CranePos.POS_S)
+        elif cmd == CraneCmd.ROTATE_LSC:
+            self.logger.info("Setting crane to POS_LSC")
+            r_base.cmd.set(CranePos.POS_LSC)
+        elif cmd == CraneCmd.ROTATE_ST:
+            self.logger.info("Setting crane to POS_ST")
+            r_base.cmd.set(CranePos.POS_ST)
+        elif cmd == CraneCmd.PICKUP_WP:
+            self.logger.info("Picking up WP: Retracting MC")
+            mc.cmd.set(MonostableCylinderCmd.RETRACT)
+            self._is_picking_up = True
+        elif cmd == CraneCmd.PUTDOWN_WP:
+            self.logger.info("Releasing WP: Retracting MC")
+            mc.cmd.set(MonostableCylinderCmd.RETRACT)
+            self._is_putting_down = True
+        else:
+            raise UnsupportedCmd(f"Received unknown crane command: {cmd}")
+    =}
+
+    // @label update_discrete_position
+    reaction (r_base.d_pos) {=
+        self._current_postion = r_base.d_pos.value
+    =}
+
+    // @label update_base_angle
+    reaction (r_base.angle) {=
+        current_angle = r_base.angle.value
+        if self._wp is not None:
+            # Update WP position based on current angle
+            d_theta = current_angle - self._current_angle if self._current_angle is not None else 0
+            self.logger.debug(f"Rotating WP by {d_theta} radians around crane base at ({self.ref_x}, {self.ref_y})")
+            self._wp.shape.rotate(d_theta, origin=Point(self.ref_x, self.ref_y))
+
+        self._current_angle = current_angle
+    =}
+
+    // @label forward_deferred_mc_cmd
+    reaction (deferred_mc_cmd) -> mc.cmd{=
+        mc.cmd.set(deferred_mc_cmd.value)
+    =}
+
+    // @label handle_mc_state_change
+    reaction (mc.s) -> current_wp, wp_out_stack, wp_out_stamp, wp_out_lsc, deferred_mc_cmd{=
+        mc_state = MonostableCylinderState(mc.s.value)
+        self.logger.debug(f"Crane MC state changed to {mc_state.name}")
+
+        crane_position = self._current_postion
+        if mc_state == MonostableCylinderState.EXTENDING and self._is_picking_up:
+            self.logger.info(f"Crane MC extending at position {crane_position}")
+            if crane_position == CranePos.POS_S and self._wp_in_stack is not None:
+                self._wp = self._wp_in_stack
+                self._wp_in_stack = None
+            if crane_position == CranePos.POS_LSC and self._wp_in_lsc is not None:
+                self._wp = self._wp_in_lsc
+                self._wp_in_lsc = None
+            if crane_position == CranePos.POS_ST and self._wp_in_stamp is not None:
+                self._wp = self._wp_in_stamp
+                self._wp_in_stamp = None
+            if self._wp is not None:
+                self.logger.info(f"Crane MC extending at position {crane_position}, holding WP: {self._wp}")
+                current_wp.set(self._wp)
+
+        # Clean up flags
+        if mc_state == MonostableCylinderState.EXTENDED:
+            if self._is_putting_down:
+                self._is_putting_down = False
+            if self._is_picking_up:
+                self._is_picking_up = False
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # After retracting, for both pickup and putdown, extend the MC again
+            # Use deferred action to break cyclic dependency
+            deferred_mc_cmd.schedule(0, MonostableCylinderCmd.EXTEND)
+
+            if self._is_putting_down:
+                if crane_position == CranePos.POS_S:
+                    self._wp_in_stack = self._wp
+                    wp_out_stack.set(self._wp)
+                    self.logger.debug(f"Dropping WP at stack: {self._wp}")
+                if crane_position == CranePos.POS_LSC:
+                    self._wp_in_lsc = self._wp
+                    wp_out_lsc.set(self._wp)
+                    self.logger.debug(f"Dropping WP at LSC: {self._wp}")
+                if crane_position == CranePos.POS_ST:
+                    self._wp_in_stamp = self._wp
+                    wp_out_stamp.set(self._wp)
+                    self.logger.debug(f"Dropping WP at stamp: {self._wp}")
+                self.logger.info(f"Crane MC retracted at position {crane_position}, released WP: {self._wp}")
+                self._wp = None
+                current_wp.set(self._wp)
+    =}
+
+}

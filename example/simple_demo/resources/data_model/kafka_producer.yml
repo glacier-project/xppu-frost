@@ -1,0 +1,13 @@
+name: kafka_producer   # name of the node
+machine_category: unknown   # category of the machine
+machine_type: unknown   # type of the machine
+machine_model: unknown   # model of the machine
+description: Bridge node forwarding xPPU variable updates to a Kafka topic.
+root: !!FolderNode
+  name: KafkaProducer
+  description: ''
+  children:
+  - !!StringVariableNode
+    name: Topic
+    description: Kafka topic the xPPU variable updates are published to.
+    initial_value: xppu_data

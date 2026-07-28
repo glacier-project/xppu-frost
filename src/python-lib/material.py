@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from enum import Enum
-from shape import Shape, CircleShape
+from shape import Shape, CircleShape, WP_COLOR, STEEL_COLOR, PLASTIC_COLOR
 from shapely import Point
+
+MATERIAL_RADIUS = 0.025  # meters
+MATERIAL_WIDTH = MATERIAL_RADIUS * 2  # meters
 
 @dataclass(frozen=True)
 class Position:
@@ -23,13 +26,14 @@ class Material:
             weight: float = 0,
             shape: Shape | None = None,
             cap: str = '',
-            stamped: bool = False
+            stamped: bool = False,
+            color: tuple[int, int, int] = WP_COLOR
             ):
         self.id = id
         self.m_type = m_type
         self.weight = weight
         if shape is None:
-            shape = CircleShape(Point(0,0,0), radius=0.025)
+            shape = CircleShape(Point(0,0,0), radius=MATERIAL_RADIUS, color=color)
         self.shape = shape
         self.cap = cap
         self.stamped = stamped
@@ -61,7 +65,7 @@ class SteelMaterial(Material):
             weight: float = 0,
             shape: Shape | None = None
             ):
-        super().__init__(id=id,m_type=MaterialType.STEEL,weight=weight,shape=shape)
+        super().__init__(id=id,m_type=MaterialType.STEEL,weight=weight,shape=shape, color=STEEL_COLOR)
 
 class PlasticMaterial(Material):
 
@@ -71,4 +75,4 @@ class PlasticMaterial(Material):
             weight: float = 0,
             shape: Shape | None = None
             ):
-        super().__init__(id=id,m_type=MaterialType.PLASTIC,weight=weight,shape=shape)
+        super().__init__(id=id,m_type=MaterialType.PLASTIC,weight=weight,shape=shape, color=PLASTIC_COLOR)

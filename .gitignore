@@ -174,3 +174,6 @@ Lingo.lock
 *.csv
 *.tex
 .vscode
+
+# Superpowers scratch (brainstorm, SDD ledger)
+.superpowers/
