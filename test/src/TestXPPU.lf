@@ -5,8 +5,8 @@ target Python{
 }
 
 import XPPU from "../../src/XPPU.lf"
-import FrostBus from "../../frost/src/lib/FrostBus.lf"
-import FrostMachine from "../../frost/src/lib/FrostMachine.lf"
+import FrostLink from "../../frost/src/lib/FrostLink.lf"
+import FrostReactor from "../../frost/src/lib/FrostReactor.lf"
 
 preamble{=
 import uuid
@@ -36,17 +36,28 @@ stack_buffer = [
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
+PYGAME_MANAGER = None
 =}
 
-reactor XPPUTester extends FrostMachine {
+reactor XPPUTester extends FrostReactor {
     state remaining_iterations = {= len(stack_buffer) =}
     state method_completed = False
     logical action execute_demo
+    logical action wait_conn
 
-    reaction(connected_to_bus, execute_demo) -> channel_out{=
+    reaction(startup) -> wait_conn{=
+        wait_conn.schedule(0)
+    =}
+
+    # FrostReactor exposes the link connection as the `connected` state rather
+    # than an event, so poll it until the link registration completes.
+    reaction(wait_conn, execute_demo) -> wait_conn, channel_out{=
+        if not self.connected:
+            wait_conn.schedule(MSEC(100))
+            return 0
+
         msg = self.message_builder.build_invoke_method_message(target=self._get_reactor_name(), node="/xPPUTester/Methods/RunFullDemo")
         self._set_channel_out_port(msg, channel_out)
-
     =}
 
     reaction(response_messages) -> execute_demo {=
@@ -78,7 +89,7 @@ main reactor {
     state received_wp = []
 
     xppu = new XPPU(name="xppu", stack_buffer={=deepcopy(stack_buffer)=})
-    bus = new FrostBus(name="frost_bus", width=2)
+    bus = new FrostLink(name="frost_link", width=2)
     xppu_tester = new XPPUTester(name="xppu_tester", update_interval=100 ms)
 
     xppu.channel_out, xppu_tester.channel_out -> bus.channel_in

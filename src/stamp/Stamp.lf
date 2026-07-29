@@ -14,6 +14,8 @@ import FrostBase from "../../frost/src/lib/FrostBase.lf";
 
 preamble{=
     from stamp import StampCmd
+    from shape import Point
+    from shape_utils import ComponentShape, set_wp_coordinates_to
 =}
 
 reactor Stamp(
@@ -35,8 +37,8 @@ reactor Stamp(
         STAMP_WIDTH=0.055
     =}
 
-    input cmd
     input wp_in
+    input cmd
     output wp_out
     output mc_state
     output bc_state

@@ -1,0 +1,108 @@
+name: xppu_scheduler   # name of the machine
+machine_category: unknown   # category of the machine
+machine_type: unknown   # type of the machine
+machine_model: unknown   # model of the machine
+description: '' # description of the machine
+root: !!FolderNode
+  name: XPPUScheduler
+  description: ''
+  children:
+  - !!FolderNode
+    name: Methods
+    description: ''
+    children:
+    - !!CompositeMethodNode
+      name: PickStackStampToLSC
+      description: ''
+      cfg:
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/RotateCrane
+        remote_id: xppu
+        args: [ROTATE_S]
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/AtStack
+        remote_id: xppu
+        rhs: true
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/PickupWp
+        remote_id: xppu
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/HoldingWp
+        remote_id: xppu
+        rhs: true
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/RotateCrane
+        remote_id: xppu
+        args: [ROTATE_ST]
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/AtStamp
+        remote_id: xppu
+        rhs: true
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/PutdownWp
+        remote_id: xppu
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/HoldingWp
+        remote_id: xppu
+        rhs: false
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Stamp/Methods/Stamp
+        remote_id: xppu
+        args: [STAMP_MEDIUM_P]
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Stamp/Variables/WorkpieceState
+        remote_id: xppu
+        rhs: 2
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/PickupWp
+        remote_id: xppu
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/HoldingWp
+        remote_id: xppu
+        rhs: true
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/RotateCrane
+        remote_id: xppu
+        args: [ROTATE_LSC]
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/AtLsc
+        remote_id: xppu
+        rhs: true
+        operator: ==
+      - !!CallRemoteMethodNode
+        method: /xPPU/Crane/Methods/PutdownWp
+        remote_id: xppu
+      - !!WaitRemoteEventNode
+        variable: /xPPU/Crane/Variables/HoldingWp
+        remote_id: xppu
+        rhs: false
+        operator: ==
+      returns:
+      - !!BooleanVariableNode
+        name: Result
+    - !!CompositeMethodNode
+      name: LSCToRampMid
+      description: ''
+      cfg:
+      - !!ReadRemoteVariableNode
+        variable: /xPPU/LSC/Variables/RampMidWpCount
+        remote_id: xppu
+        store_as: ramp_mid_wp_count
+      - !!CallRemoteMethodNode
+        method: /xPPU/LSC/Methods/SetWPDestination
+        remote_id: xppu
+        args: [T_TO_RAMP_MID]
+      - !!WaitRemoteEventNode
+        variable: /xPPU/LSC/Variables/RampMidWpCount
+        remote_id: xppu
+        rhs: ${ramp_mid_wp_count}
+        operator: '>'
+      returns:
+      - !!BooleanVariableNode
+        name: Result

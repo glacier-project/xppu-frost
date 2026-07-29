@@ -1,0 +1,66 @@
+target Python{
+    fast: true,
+    timeout: 10 s,
+    // files: [    ]
+}
+
+import SSConveyor from "../../src/conveyor/SSConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_sscconveyor")
+logger.setLevel(logging.DEBUG)
+PYGAME_MANAGER = None
+=}
+
+main reactor TestSSConveyor {
+
+    state wp_index = 0
+    state wps = {=
+        [
+            (SteelMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_RFC),
+            (PlasticMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_END),
+            (SteelMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_RFC),
+            (PlasticMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_END),
+            (SteelMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_END),
+            (PlasticMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_END),
+            (SteelMaterial(id=str(uuid.uuid4())), SSCCmdType.T_TO_RFC),
+        ]
+    =}
+    state c_wps_received_at_rfc = []
+    state c_wps_received_at_end = []
+
+    timer add_wps(0 ms, 300 ms)
+
+    c = new SSConveyor(name="ssc")
+
+    reaction (add_wps) -> c.wp_in_start, c.cmd{=
+        if self.wp_index >= len(self.wps):
+            return 0 # No more WPs to add
+
+        wp, wp_cmd_type = self.wps[self.wp_index]
+        self.wp_index += 1
+        c.wp_in_start.set(wp)
+        c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
+        logger.debug(f"Added WP {wp} to LSConveyor with command {wp_cmd_type}")
+    =}
+
+    reaction (c.wp_out_rfc, c.wp_out_end) {=
+        if c.wp_out_rfc.is_present:
+            logger.debug(f"Received WP {c.wp_out_rfc.value} from RFC")
+            self.c_wps_received_at_rfc.append((c.wp_out_rfc.value, SSCCmdType.T_TO_RFC))
+        if c.wp_out_end.is_present:
+            logger.debug(f"Received WP {c.wp_out_end.value} from conveyor end")
+            self.c_wps_received_at_end.append((c.wp_out_end.value, SSCCmdType.T_TO_END))
+    =}
+
+    reaction (shutdown) {=
+        c_wps_received_at_rfc = [(wp, cmd) for wp, cmd in self.wps if cmd == SSCCmdType.T_TO_RFC]
+        assert self.c_wps_received_at_rfc == c_wps_received_at_rfc, f"Expected WPs at RFC {c_wps_received_at_rfc}, but received {self.c_wps_received_at_rfc}"
+
+        c_wps_received_at_end = [(wp, cmd) for wp, cmd in self.wps if cmd == SSCCmdType.T_TO_END]
+        assert self.c_wps_received_at_end == c_wps_received_at_end, f"Expected WPs at end {c_wps_received_at_end}, but received {self.c_wps_received_at_end}"
+    =}
+}

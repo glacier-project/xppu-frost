@@ -204,3 +204,16 @@ Contributions are welcome! Please follow the [contribution guidelines](.github/c
 ## License
 
 See [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use **xPPU-Frost**, please cite it as below.:
+
+```
+@inproceedings{frost:indin:2026,
+  author    = {{Santacà}, Samuele and Gaiardelli, Sebastiano and Fummi, Franco},
+  booktitle = {2026 IEEE 24rd International Conference on Industrial Informatics (INDIN)},
+  title     = {{xPPU-Frost: A Testbed for Evaluating Deterministic Industrial Automation Strategies}},
+  year      = {2026}
+}
+```

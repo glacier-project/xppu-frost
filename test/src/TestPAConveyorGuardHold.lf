@@ -1,0 +1,108 @@
+target Python{
+    fast: true,
+    timeout: 20 s,
+    single-threaded: false,
+}
+
+import PAConveyor from "../../src/conveyor/PAConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_paconveyor_guard_hold")
+logger.setLevel(logging.DEBUG)
+
+# Delay before the trailing WP enters, chosen so that the leading WP is inside
+# the MC guard area (0.15 m along the belt) at the moment the trailing WP
+# reaches POS1 and stops the belt for its pick.
+TRAILING_WP_DELAY_MS = 400
+
+PYGAME_MANAGER = None
+=}
+
+/**
+ * Regression test for the interaction between the PA holding the belt and the
+ * MC guard letting a WP through.
+ *
+ * The leading WP is cleared to pass the guard, and while it is still inside the
+ * guard area the trailing WP reaches POS1 and the arm stops the belt to pick it
+ * up. A guard that re-arms on a fixed delay would extend during that pause and
+ * trap the leading WP short of its target; re-arming on the WP actually
+ * clearing the guard area lets it continue once the belt restarts.
+ */
+main reactor TestPAConveyorGuardHold {
+    state leading_wp = {= SteelMaterial(id=str(uuid.uuid4())) =}
+    state trailing_wp = {= PlasticMaterial(id=str(uuid.uuid4())) =}
+    state picked_wps = []
+    state released_wps = []
+
+    logical action add_trailing
+    logical action set_cmd
+
+    c = new PAConveyor(name="pac",
+        ref_x=0.255, # m
+        ref_y=0.45, # m
+        c_angle=0, # radians
+        length=0.60, # m
+        width=0.055, # m
+        speed=0.185 # m/s
+    )
+
+    reaction (startup) -> c.wp_in_start, c.cmd, add_trailing {=
+        # POS4 sits downstream of the guard, so this WP needs to be let through.
+        c.wp_in_start.set(self.leading_wp)
+        c.cmd.set(ConveyorCmd(self.leading_wp, PACCmdType.PICK_FROM_POS4))
+        logger.info(f"Leading WP {self.leading_wp} added with PICK_FROM_POS4")
+
+        add_trailing.schedule(MSECS(TRAILING_WP_DELAY_MS))
+    =}
+
+    reaction (add_trailing) -> c.wp_in_start, c.cmd {=
+        # POS1 is upstream of the guard, so this WP stops the belt early, while
+        # the leading WP is still crossing the guard.
+        c.wp_in_start.set(self.trailing_wp)
+        c.cmd.set(ConveyorCmd(self.trailing_wp, PACCmdType.PICK_FROM_POS1))
+        logger.info(f"Trailing WP {self.trailing_wp} added with PICK_FROM_POS1")
+    =}
+
+    reaction (set_cmd) -> c.cmd {=
+        c.cmd.set(set_cmd.value)
+    =}
+
+    reaction (c.pa_wp_picked) -> set_cmd {=
+        wp = c.pa_wp_picked.value
+        self.picked_wps.append(wp)
+        logger.info(f"PA picked {wp}")
+
+        # The arm can only hold one WP, so put the trailing one back down at
+        # POS2 to free the gripper before the leading WP reaches POS4.
+        if wp == self.trailing_wp:
+            set_cmd.schedule(0, ConveyorCmd(self.trailing_wp, PACCmdType.PUTDOWN_TO_POS2))
+    =}
+
+    reaction (c.pa_wp_released) {=
+        wp = c.pa_wp_released.value
+        self.released_wps.append(wp)
+        logger.info(f"PA released {wp}")
+    =}
+
+    reaction (shutdown) {=
+        assert self.trailing_wp in self.picked_wps, \
+            f"Trailing WP was never picked from POS1; picked: {self.picked_wps}"
+
+        # The point of the test: the leading WP got past the guard despite the
+        # belt having been stopped while it was inside the guard area. Asserted
+        # before the putdown because a trapped leading WP comes to rest in the
+        # POS2 area, which then also blocks the putdown - checking the root
+        # cause first keeps the failure readable.
+        assert self.leading_wp in self.picked_wps, \
+            f"Leading WP never reached POS4 - it was trapped at the MC guard; picked: {self.picked_wps}"
+
+        assert self.trailing_wp in self.released_wps, \
+            f"Trailing WP was never put back down at POS2; released: {self.released_wps}"
+
+        assert self.picked_wps.index(self.trailing_wp) < self.picked_wps.index(self.leading_wp), \
+            "Expected the trailing WP to be picked from POS1 before the leading WP reached POS4"
+    =}
+}

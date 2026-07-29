@@ -1,0 +1,190 @@
+target Python{
+    fast: true,             # Set to false to enable real-time execution
+    timeout: 180 s,         # Maximum logical execution time, comment out for no limit
+    single-threaded: false, # Enable multithreading
+    // logging: DEBUG,        # Enable logging
+}
+
+import XPPU from "../../../src/XPPU.lf"
+import FrostLink from "../../../frost/src/lib/FrostLink.lf"
+import FrostReactor from "../../../frost/src/lib/FrostReactor.lf"
+
+preamble{=
+import uuid
+from frost import *
+import numpy as np
+from copy import deepcopy
+from crane import CranePos
+from material import Position, Material, SteelMaterial, PlasticMaterial
+from shape_utils import set_wp_coordinates_to
+from machine_data_model.tracing import TraceLevel, clear_traces
+
+# Scheduling imports
+from frost_planner.core.base import TaskStatus, Job, SchedulingInstance
+from frost_planner.generator.instance_generator import load_instance_from_json
+from frost_planner.solver.dummy_solver import DummySolver
+from frost_planner.executor.dynamic_executor import DynamicExecutor
+from frost_planner.visualization.instance_dot_exporter import (
+    export_instance_to_dot,
+    render_dot_to_file,
+)
+
+logger = logging.getLogger("sc14")
+logger.setLevel(logging.INFO)
+crane_dpos={
+    CranePos.POS_S:np.pi,
+    CranePos.POS_LSC:(3/2)*np.pi,
+    CranePos.POS_ST:0,
+    CranePos.POS_ST:2*np.pi
+}
+
+stack_buffer = [
+    SteelMaterial(id=str(uuid.uuid4())),
+    PlasticMaterial(id=str(uuid.uuid4())),
+    SteelMaterial(id=str(uuid.uuid4()))
+]
+
+# The conveyor reactors render themselves through this manager when it is set;
+# None disables rendering (same convention as the test suite).
+PYGAME_MANAGER = None
+=}
+
+reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) extends FrostReactor{
+    input is_stack_empty
+    input stack_wp_at_pickup
+
+    state scheduling_instance = _scheduling_instance
+    state scheduling_interval = _scheduling_interval # in s
+    state recipe_template = "undefined"
+    state _executor
+    state _active_tasks = {={}=}
+    state request_wp = True
+    logical action task_completed
+    logical action start_tasks
+    logical action update_schedule
+    logical action wait_conn
+
+    reaction(startup) -> wait_conn {=
+        self.scheduling_instance = load_instance_from_json(self.scheduling_instance)
+        self._executor = DynamicExecutor(DummySolver(instance=self.scheduling_instance))
+
+        with open(self.recipe_template, "r") as f:
+            self.recipe_template = Job.model_validate_json(f.read())
+        self.logger.info(f"Loaded recipe template job: {self.recipe_template}")
+
+        wait_conn.schedule(0)
+    =}
+
+    method create_method_request(t, method_path, args, kwargs){=
+        return self.message_builder.build_invoke_method_message(
+            target=t,
+            node=method_path,
+            args=args,
+            kwargs=kwargs
+        )
+    =}
+
+    method send_stack_wp_request(channel_out){=
+        msg = self.message_builder.build_invoke_method_message(target="xppu", node="/xPPU/Stack/Methods/RequestWp")
+        self._set_channel_out_port(msg, channel_out)
+    =}
+
+    // @label wait_for_link_connection
+    # FrostReactor exposes the link connection as the `connected` state rather
+    # than an event, so poll it until the link registration completes.
+    reaction(wait_conn) -> wait_conn, update_schedule, channel_out{=
+        if not self.connected:
+            wait_conn.schedule(MSEC(100))
+            return 0
+
+        self.logger.info("Connected to link. Starting scheduling...")
+        update_schedule.schedule(0)
+
+        self.send_stack_wp_request(channel_out)
+    =}
+
+    reaction(is_stack_empty, stack_wp_at_pickup) {=
+        if is_stack_empty.is_present:
+            self.logger.info("XPPU stack is empty. Stopping requesting workpieces.")
+            self.request_wp = False
+
+        if stack_wp_at_pickup.is_present:
+            # Add a new Job to the scheduler for processing the workpiece
+            recipe = self.recipe_template.model_copy(deep=True)
+            current_instance = self._executor.solver.instance
+            self._executor.solver = DummySolver(instance= SchedulingInstance(
+                jobs=current_instance.jobs + [recipe],
+                machines=current_instance.machines,
+                travel_times=current_instance.travel_times,
+            ))
+    =}
+
+    // @label update_schedule
+    reaction(update_schedule) -> update_schedule, start_tasks{=
+        executor = self._executor
+        logical_time = self._get_current_logical_time_sec()
+        self.logger.debug(f"Scheduling at logical time {logical_time} sec")
+        executor.update_task_status()
+        # TODO: Frost planner should support starting from logical time different than 0
+        schedule = executor.update_schedule(start_time=0)
+
+        # get the tasks that can be started now
+        next_tasks = executor.next_ready_tasks()
+        if next_tasks:
+            start_tasks.schedule(0, next_tasks)
+
+        scheduling_interval = SECS(self.scheduling_interval)
+        self.logger.debug(f"Scheduling next task in {scheduling_interval} s...")
+        update_schedule.schedule(scheduling_interval)
+    =}
+
+    // @label run_tasks
+    reaction(start_tasks) {=
+        self.logger.info(f"Starting tasks: {start_tasks.value}")
+
+        # Add here the request of the new workpiece if needed
+
+        # next_ready_tasks() yields (ScheduledTask, machine id); the Machine
+        # object itself hangs off the scheduled task.
+        for task, machine_id in start_tasks.value:
+            machine = task.machine.name
+            task_name = task.task.name
+            self.logger.info(f"Starting task {task_name} on machine {machine}")
+            task.start_time = self._get_current_logical_time_sec()
+            self._executor.task_started(task)
+
+            msg = self.create_method_request(self.data_model.name, f"/XPPUScheduler/Methods/{task_name}", args=[machine, f"/Machine/{task_name}"], kwargs={})
+            self._active_tasks[msg.correlation_id] = task
+            self.protocol_mng.handle_request(msg)
+
+    =}
+
+    reaction(response_messages) -> channel_out{=
+        for bank_index, message in response_messages.value:
+
+            if message.correlation_id not in self._active_tasks:
+                continue
+
+            if message.header.msg_name != MethodMsgName.COMPLETED:
+                continue
+
+            task = self._active_tasks.pop(message.correlation_id)
+            task.end_time = self._get_current_logical_time_sec()
+            self._executor.task_completed(task)
+            self.logger.info(f"Task {task.task.name} completed on machine {task.machine.name}")
+
+            if task.task.name == "PickStackStampToLSC" and self.request_wp:
+                self.send_stack_wp_request(channel_out)
+    =}
+
+}
+main reactor {
+    xppu = new XPPU(name="xppu", stack_buffer={= deepcopy(stack_buffer)=})
+    bus = new FrostLink(name="frost_link", width=2)
+    xppu_scheduler = new XPPUScheduler(name="xppu_scheduler", update_interval=100 ms)
+
+    xppu.channel_out, xppu_scheduler.channel_out -> bus.channel_in
+    bus.channel_out -> xppu.channel_in, xppu_scheduler.channel_in after 0
+    xppu.is_stack_empty -> xppu_scheduler.is_stack_empty;
+    xppu.stack_wp_at_pickup -> xppu_scheduler.stack_wp_at_pickup;
+}

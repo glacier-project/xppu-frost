@@ -138,7 +138,8 @@ reactor RBase (
     input cmd
     output angle
     output d_pos
-    state m_cmd
+    output m_cmd
+    state _m_cmd
 
     m = new Motor(name={=self.name + ".motor"=},tick_interval=tick_interval, ang_speed=ang_speed)
     md = new MDriver(name={=self.name + ".m_driver"=}, dpos_dict=dpos_dict)
@@ -147,4 +148,5 @@ reactor RBase (
     cmd -> md.cmd
     md.d_pos -> d_pos
     md.m_cmd -> m.m_cmd
+    md.m_cmd -> m_cmd
 }

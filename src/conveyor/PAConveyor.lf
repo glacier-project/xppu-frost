@@ -1,0 +1,371 @@
+target Python{
+    files: [
+        "../python-lib/conveyor.py",
+        "../python-lib/pac.py",
+        "../python-lib/pa.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/monostable_cylinder.py",
+        "../python-lib/guard.py",
+        "../python-lib/area_trigger.py",
+    ]
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+import Conveyor from "Conveyor.lf"
+import PA from "PA.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point, ComponentShape
+from material import Material, MATERIAL_WIDTH, MaterialType
+from position_sensor import PositionSensor
+from area_trigger import AreaTrigger, AreaCondition
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from guard import Guard
+from conveyor import ConveyorCmd
+from pa import PACmd, PACmdType, PAPos
+from pac import PACCmdType, PICK_CMD_BY_POS, PUTDOWN_CMD_BY_POS, POS_BY_PICK_CMD, POS_BY_PUTDOWN_CMD
+=}
+
+reactor PAConveyor extends Conveyor{
+    preamble{=
+        PS_WIDTH = 0.016
+        PS_LENGTH = 0.055
+        PSS_OFFSET = 0.13
+        PSE_OFFSET = 0.535
+        MC_GUARD_OFFSET = 0.15 # lock
+        MC_GUARD_WIDTH = 0.01
+        MC_GUARD_LENGTH = 0.055
+        # Offsets of the four PA working positions along the belt. POS2 ends
+        # exactly where the MC guard starts, so a WP held by the guard is
+        # already sitting in the POS2 area.
+        PA_POS_OFFSETS = {
+            PAPos.POS1: 0.055,
+            PAPos.POS2: 0.095,
+            PAPos.POS3: 0.26,
+            PAPos.POS4: 0.475,
+        }
+        PA_POS_WIDTH = 0.055
+        PA_POS_LENGTH = 0.055
+        # Action name used by all PA area triggers; which position and whether
+        # it is a pick or a putdown is derived from the WP's active command.
+        PA_TRANSFER_ACTION = "pa_transfer"
+        # Commands whose WP has to get past the MC guard: everything targeting a
+        # point downstream of it.
+        GUARD_PASSAGE_CMDS = [
+            PACCmdType.T_TO_END,
+            PACCmdType.T_TO_PS_END,
+            PACCmdType.PICK_FROM_POS3,
+            PACCmdType.PICK_FROM_POS4,
+        ]
+    =}
+
+    state _position_sensor_start = {=PositionSensor(name="ps-start", working_area=self._conveyor_shape.get_sensor_shape(self.PSS_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+    state _position_sensor_end = {=PositionSensor(name="ps-end", working_area=self._conveyor_shape.get_sensor_shape(self.PSE_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    state _mc_guard_area = {= self._conveyor_shape.get_sensor_shape(self.MC_GUARD_OFFSET, self.MC_GUARD_WIDTH, self.MC_GUARD_LENGTH) =}
+    state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
+    state mc_guard_wp
+
+    state _pa_areas = {= { pos: self._conveyor_shape.get_sensor_shape(offset, self.PA_POS_WIDTH, self.PA_POS_LENGTH) for pos, offset in self.PA_POS_OFFSETS.items() } =}
+    # Position the arm is currently at, None until it has moved for the first time.
+    state _pa_pos
+    # Position the arm should travel to, from the most recent pick/putdown command.
+    state _pa_desired_pos
+    # True while a command sent to the arm is still outstanding.
+    state _pa_busy = False
+    # Transfer waiting to be executed once the arm is in place.
+    state _pa_pending_transfer
+
+    # Every command to the arm goes through this action. Writing pa.cmd directly
+    # from the reactions that read the arm's outputs would close a causality
+    # loop; the microstep delay breaks it.
+    logical action pa_dispatch
+    output mc_guard_state
+    output ps_start_wp_detected
+    output ps_end_wp_detected
+    output pa_position
+    output pa_mc_state
+    output pa_wp_picked
+    output pa_wp_released
+
+    mc_guard = new MonostableCylinder(
+        name={=self.name + ".mc_guard"=},
+        retraction_speed=223.684, # m/s t= 0.38ms
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=False
+    )
+    mc_guard.s -> mc_guard_state
+
+    pa = new PA(name={=self.name + ".pa"=})
+    pa.position -> pa_position
+    pa.mc_state -> pa_mc_state
+    pa.wp_picked -> pa_wp_picked
+    pa.wp_released -> pa_wp_released
+
+    method get_transfer_pos(cmd){=
+        """Returns the PA position a conveyor command refers to, or None if the
+        command does not involve the arm.
+
+        Args:
+            cmd (ConveyorCmd): The command to inspect.
+        """
+        if cmd is None:
+            return None
+
+        cmd_type = cmd.cmd_type
+        if cmd_type in POS_BY_PICK_CMD:
+            return POS_BY_PICK_CMD[cmd_type]
+        return POS_BY_PUTDOWN_CMD.get(cmd_type)
+    =}
+
+    method dispatch_pa(pa_cmd_evt, pa_wp_in_evt){=
+        """Drives the arm towards whatever it should be doing next: travel to
+        the position it is needed at, then run the pending transfer once it has
+        arrived. Called whenever something that feeds this decision changes, so
+        a transfer requested while the arm is still travelling is retried on
+        arrival rather than dropped.
+
+        Args:
+            pa_cmd_evt (event): Event to send commands to the arm.
+            pa_wp_in_evt (event): Event announcing a WP to the arm.
+        """
+        if self._pa_busy:
+            return
+
+        transfer = self._pa_pending_transfer
+        target = self.get_transfer_pos(transfer)
+        if target is None:
+            target = self._pa_desired_pos
+
+        if target is None:
+            return
+
+        if self._pa_pos != target:
+            self.logger.info(f"Sending PA to {target}")
+            pa_cmd_evt.set(PACmd(PACmdType.MOVE_TO_POS, target))
+            self._pa_busy = True
+            return
+
+        if transfer is None:
+            return
+
+        wp = transfer.wp
+        if transfer.cmd_type in POS_BY_PICK_CMD:
+            self.logger.info(f"Commanding PA to pick WP {wp} from {target}")
+            pa_wp_in_evt.set((target, wp))
+            pa_cmd_evt.set(PACmd(PACmdType.PICKUP_FROM_POS, target))
+        else:
+            self.logger.info(f"Commanding PA to put WP {wp} down at {target}")
+            pa_cmd_evt.set(PACmd(PACmdType.PUTDOWN_TO_POS, target))
+
+        self._pa_busy = True
+    =}
+
+    reaction (startup) {=
+        # A pick only starts once the WP is fully inside its position, so the WP
+        # centre has to land within PA_POS_WIDTH - MATERIAL_WIDTH of the centre
+        # on some tick. That is guaranteed exactly while the belt advances less
+        # than that per tick. Any faster and a WP could straddle the position on
+        # one tick and be past it on the next, and the pick would never fire.
+        tick_step = abs(self.speed) * convert_time_float(self.tick_interval, TimePrecision.NSECS, TimePrecision.SECS)
+        capture_window = self.PA_POS_WIDTH - MATERIAL_WIDTH
+        assert tick_step < capture_window, (
+            f"Belt advances {tick_step} m per tick but a PA position only offers a "
+            f"{capture_window} m capture window; lower the speed or the tick interval."
+        )
+
+        # Add PS triggers
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_start,
+            triggering_cmd=PACCmdType.T_TO_PS_START,
+            target_action="remove_to_ps_start_cmd",
+            delay=0
+        )
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_end,
+            triggering_cmd=PACCmdType.T_TO_PS_END,
+            target_action="remove_to_ps_end_cmd",
+            delay=0
+        )
+
+        # Every WP heading past the guard is let through when it reaches
+        # ps-start, and the guard is re-armed once that WP has physically
+        # cleared the guard area. A fixed re-arm delay would be wrong here: the
+        # PA can stop the belt part-way through, leaving the WP trapped.
+        for cmd_type in self.GUARD_PASSAGE_CMDS:
+            self.register_position_sensor_trigger(
+                sensor=self._position_sensor_start,
+                triggering_cmd=cmd_type,
+                target_action="disable_mc_guard",
+                delay=0
+            )
+            self.register_area_trigger(
+                area=self._mc_guard_area,
+                triggering_cmd=cmd_type,
+                target_action="rearm_mc_guard",
+                condition=AreaCondition.WP_PASSED,
+                delay=0
+            )
+
+        # Add PA area triggers: a pick starts once the WP is fully inside its
+        # position, a putdown once that position is free of other WPs.
+        for pos, area in self._pa_areas.items():
+            self.register_area_trigger(
+                area=area,
+                triggering_cmd=PICK_CMD_BY_POS[pos],
+                target_action=self.PA_TRANSFER_ACTION,
+                condition=AreaCondition.WP_INSIDE,
+                delay=0
+            )
+            self.register_area_trigger(
+                area=area,
+                triggering_cmd=PUTDOWN_CMD_BY_POS[pos],
+                target_action=self.PA_TRANSFER_ACTION,
+                condition=AreaCondition.AREA_CLEAR,
+                delay=0
+            )
+
+        self.add_guard(self._mc_guard)
+
+
+        if PYGAME_MANAGER:
+            PYGAME_MANAGER.add_static_element(self._position_sensor_start.working_area)
+            PYGAME_MANAGER.add_static_element(self._position_sensor_end.working_area)
+            PYGAME_MANAGER.add_static_element(self._mc_guard_area)
+            for pos, area in self._pa_areas.items():
+                PYGAME_MANAGER.add_static_element(area, pos.value)
+    =}
+
+    // @label handle_pa_cmd
+    reaction (cmd) -> pa_dispatch{=
+        target = self.get_transfer_pos(cmd.value)
+        if target is None:
+            return 0
+
+        self._pa_desired_pos = target
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label dispatch_pa_cmd
+    reaction (pa_dispatch) -> pa.cmd, pa.wp_in{=
+        self.dispatch_pa(pa.cmd, pa.wp_in)
+    =}
+
+    // @label handle_ps_actions
+    reaction (trigger_ps_action) -> mc_guard.cmd, ps_start_wp_detected, ps_end_wp_detected{=
+        action, wp = trigger_ps_action.value
+
+        if action == "disable_mc_guard":
+            self.logger.warning(f"Disabling MC Guard to allow WP {wp} to pass")
+            mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
+            assert self.mc_guard_wp is None, "MC Guard WP should be None when disabling guard"
+            self.mc_guard_wp = wp
+
+        if action == "remove_to_ps_start_cmd":
+            # Remove the T_TO_PS_START command
+            self.logger.warning(f"Clearing T_TO_PS_START command for WP {wp}")
+            self.clear_cmd(wp, PACCmdType.T_TO_PS_START)
+            ps_start_wp_detected.set(wp)
+
+        if action == "remove_to_ps_end_cmd":
+            # Remove the T_TO_PS_END command, halting the WP at the end sensor
+            self.logger.warning(f"Clearing T_TO_PS_END command for WP {wp}")
+            self.clear_cmd(wp, PACCmdType.T_TO_PS_END)
+            ps_end_wp_detected.set(wp)
+    =}
+
+    // @label handle_area_actions
+    reaction (trigger_area_action) -> pa_dispatch, mc_guard.cmd{=
+        action, wp = trigger_area_action.value
+
+        if action == "rearm_mc_guard":
+            # The WP is through: block the ones behind it again.
+            self.logger.debug(f"WP {wp} cleared the MC Guard, re-arming it")
+            mc_guard.cmd.set(MonostableCylinderCmd.EXTEND)
+            self._mc_guard.disallow_wp(wp)
+            return 0
+
+        if action != self.PA_TRANSFER_ACTION:
+            return 0
+
+        cmd = self._active_cmds.get(wp)
+        if cmd is None:
+            # The command was cleared between detection and this microstep.
+            return 0
+
+        self.logger.info(f"PA transfer triggered for WP {wp} by command {cmd.cmd_type}")
+
+        # The belt must stand still for the whole transfer, both so the WP does
+        # not drift out from under the gripper and so a putdown target stays free.
+        self.hold()
+        self._pa_pending_transfer = cmd
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label handle_pa_position
+    reaction (pa.position) -> pa_dispatch{=
+        self._pa_pos = pa.position.value
+        self._pa_busy = False
+        self.logger.debug(f"PA reached {self._pa_pos}")
+
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label handle_pa_wp_out
+    reaction (pa.wp_out){=
+        position, wp = pa.wp_out.value
+        area = self._pa_areas[position]
+
+        assert self._hold, f"Belt must be held while the PA puts WP {wp} down at {position}"
+        for other in self._wps:
+            assert not area.intersects(other.shape), f"PA position {position} is occupied by WP {other}"
+
+        centroid_pos = area.centroid_pos
+        wp.shape.translate_to(x=centroid_pos.x, y=centroid_pos.y)
+        self.logger.debug(f"Placed WP {wp} at {position} ({centroid_pos})")
+    =}
+
+    // @label handle_pa_transfer_end
+    reaction (pa.wp_picked, pa.wp_released) -> pa_dispatch{=
+        if pa.wp_picked.is_present:
+            wp = pa.wp_picked.value
+            position = self.get_transfer_pos(self._active_cmds.get(wp))
+
+            # The belt was held for the whole transfer, so the WP must still be
+            # where it was detected.
+            assert position is not None, f"No active pick command for WP {wp}"
+            assert self._pa_areas[position].contains(wp.shape), f"WP {wp} drifted out of {position} during pickup"
+
+            self._wps.remove(wp)
+            self.logger.info(f"PA picked up WP {wp} from {position}")
+        else:
+            wp = pa.wp_released.value
+            self.insert_wp(wp)
+            self.logger.info(f"PA released WP {wp}")
+
+        self._pa_busy = False
+        self._pa_pending_transfer = None
+        self._pa_desired_pos = None
+        self.remove_cmd(wp)
+        self.release()
+
+        pa_dispatch.schedule(0)
+    =}
+
+    // @label handle_mc_guard_state_update
+    reaction (mc_guard.s){=
+        mc_state=mc_guard.s.value
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # Let the awaited WP through. The guard is re-armed by the
+            # rearm_mc_guard area trigger once that WP has actually cleared it.
+            self._mc_guard.allow_wp(self.mc_guard_wp)
+            self.mc_guard_wp = None
+    =}
+}

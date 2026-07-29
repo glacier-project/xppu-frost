@@ -1,0 +1,65 @@
+target Python{
+    fast: true,
+    timeout: 10 s,
+    // files: [    ]
+}
+
+import RFConveyor from "../../src/conveyor/RFConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial, PlasticMaterial
+
+logger = logging.getLogger("test_rfconveyor")
+logger.setLevel(logging.DEBUG)
+PYGAME_MANAGER = None
+=}
+
+main reactor TestRFConveyor {
+    state wp_index = 0
+    state wps = {=
+        [
+            (SteelMaterial(id=str(uuid.uuid4())), RFCCmdType.T_TO_LSC),
+            (PlasticMaterial(id=str(uuid.uuid4())), RFCCmdType.T_TO_PS_END),
+            (SteelMaterial(id=str(uuid.uuid4())), RFCCmdType.T_TO_PS_END),
+            (PlasticMaterial(id=str(uuid.uuid4())), RFCCmdType.T_TO_PS_END),
+        ]
+    =}
+    state c_wps_received = []
+
+    logical action set_cmd
+    timer add_wps(0 ms, 200 ms)
+
+    c = new RFConveyor(name="rfc")
+
+    reaction (add_wps) -> c.wp_in_start, c.cmd{=
+        if self.wp_index >= len(self.wps):
+            return 0 # No more WPs to add
+
+        wp, wp_cmd_type = self.wps[self.wp_index]
+        self.wp_index += 1
+        c.wp_in_start.set(wp)
+        c.cmd.set(ConveyorCmd(wp, wp_cmd_type))
+        logger.debug(f"Added WP {wp} to RFConveyor with command {wp_cmd_type}")
+    =}
+
+    reaction (set_cmd) -> c.cmd{=
+        c.cmd.set(set_cmd.value)
+    =}
+
+    reaction (c.wp_out_end) -> set_cmd{=
+        if c.wp_out_end.is_present:
+            logger.debug(f"Received WP {c.wp_out_end.value} from end")
+            self.c_wps_received.append((c.wp_out_end.value, RFCCmdType.T_TO_LSC))
+            # Set the cmd for the next wp
+            if len(self.c_wps_received) < len(self.wps):
+                wp = self.wps[len(self.c_wps_received)][0]
+                set_cmd.schedule(0, ConveyorCmd(wp, RFCCmdType.T_TO_LSC))
+                # Update expected WPs
+                self.wps[len(self.c_wps_received)] = (wp, RFCCmdType.T_TO_LSC)
+    =}
+
+    reaction (shutdown) {=
+        assert self.c_wps_received == self.wps, f"Expected WPs {self.wps}, but received {self.c_wps_received}"
+    =}
+}

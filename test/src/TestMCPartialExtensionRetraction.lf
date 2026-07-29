@@ -8,6 +8,7 @@ import FrostBase from "../../frost/src/lib/FrostBase.lf";
 preamble{=
 import uuid
 from frost import *
+epsilon = MSECS(1)  # Allowable timing error of 1ms
 logger = logging.getLogger("test_monostable_cylinder")
 logger.setLevel(logging.DEBUG)
 =}
@@ -68,11 +69,10 @@ main reactor extends FrostBase {
     reaction (mc.s) -> mc.cmd{=
         state = mc.s.value
         expected_state, expected_time = self.expected_states.pop(0)
-        epsilon = MSECS(1)  # Allowable timing error of 1ms
 
         self.logger.warning(f"State change: {state.name} (expected: {expected_state.name}, time: {expected_time} ns)")
         assert state == expected_state, f"Expected state {expected_state.name}, got {state.name}"
-        assert (lf.time.logical_elapsed() - MSECS(expected_time)) < epsilon, f"Expected time at least {expected_time} ns, got {lf.time.logical_elapsed()} ns"
+        assert ((lf.time.logical_elapsed() - MSECS(expected_time)) / epsilon) < 1, f"Expected time at least {expected_time} ns, got {lf.time.logical_elapsed()} ns"
     =}
 
     reaction (send_cmd) -> mc.cmd{=

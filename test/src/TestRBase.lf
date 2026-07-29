@@ -6,13 +6,12 @@ target Python{
 import RBase from "../../src/crane/RBase.lf"
 
 preamble{=
-    import uuid
-    import numpy as np
-    from frost import *
-    from copy import deepcopy
-=}
+import uuid
+import numpy as np
+from frost import *
+from copy import deepcopy
 
-preamble{=
+epsilon = MSECS(1)  # Allowable timing error of 1ms
 ANGLE_POS_S=np.pi
 ANGLE_POS_LSC=(3/2)*np.pi
 ANGLE_POS_ST=0
@@ -65,10 +64,9 @@ main reactor {
 
         expected_pos, expected_time = self.expected_positions.pop(0)
         current_time = lf.time.logical_elapsed()
-        epsilon = MSECS(1)  # Allowable timing error of 1ms
 
         assert expected_pos == r_base.d_pos.value, f"Expected position {expected_pos}, got {r_base.d_pos.value}"
-        assert (current_time - expected_time) < epsilon, f"Expected time at least {expected_time} ns, got {current_time} ns"
+        assert ((current_time - expected_time) / epsilon) < 1, f"Expected time at least {expected_time} ns, got {current_time} ns"
     =}
 
     reaction (shutdown) {=

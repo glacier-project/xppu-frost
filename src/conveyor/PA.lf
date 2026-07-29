@@ -1,0 +1,169 @@
+target Python{
+    files: [
+        "../python-lib/pa.py",
+        "../python-lib/material.py",
+        "../python-lib/shape.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/monostable_cylinder.py",
+    ]
+}
+
+import FrostBase from "../../frost/src/lib/FrostBase.lf";
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from pa import PACmd, PACmdType, PAPos
+from material import Material
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+=}
+
+/**
+ * Pick Alpha arm: a linear axis running along the PAConveyor with a vertical
+ * gripper cylinder, able to lift a workpiece off the belt at one of four
+ * positions and set it back down at another.
+ *
+ * The axis is modelled by travel time only: a move schedules a single delay of
+ * |target - current| / speed and the arm is considered to be at the target when
+ * it elapses. Intermediate positions are never reported.
+ */
+reactor PA(
+    speed=0.2,      # m/s
+    pos1=0.0175,    # m
+    pos2=0.0625,    # m
+    pos3=0.2225,    # m
+    pos4=0.4375     # m
+) extends FrostBase{
+
+    input cmd
+    # (PAPos, Material): announces the WP sitting at a position, so a subsequent
+    # PICKUP_FROM_POS knows what it is grabbing.
+    input wp_in
+
+    output position
+    # (PAPos, Material): emitted while the gripper is down, so the receiver can
+    # place the WP before the arm lifts again.
+    output wp_out
+    output wp_picked
+    output wp_released
+    output mc_state
+
+    # WPs announced via wp_in, keyed by PAPos, awaiting pickup.
+    state _wp_by_pos = {= {  } =}
+    # WP currently held by the gripper.
+    state _wp
+    # Axis offset in m. The arm homes outside of the four working positions.
+    state _axis_pos = 0
+    # Command being executed, None when idle.
+    state _current_cmd
+
+    logical action movement_delay
+
+    mc = new MonostableCylinder(
+        name={= self.name + ".mc" =},
+        retraction_speed=223.684, # m/s t= 0.38ms
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=True
+    )
+    mc.s -> mc_state
+
+    method get_pos_offset(position){=
+        """Returns the axis offset in m of the given PA position.
+
+        Args:
+            position (PAPos): The position to look up.
+        """
+        offsets = {
+            PAPos.POS1: self.pos1,
+            PAPos.POS2: self.pos2,
+            PAPos.POS3: self.pos3,
+            PAPos.POS4: self.pos4,
+        }
+        assert position in offsets, f"Unknown PA position {position}"
+        return offsets[position]
+    =}
+
+    // @label handle_wp_in
+    // Declared before handle_cmd so a WP announced in the same reaction as the
+    // pickup command is already known by the time the command is handled.
+    reaction (wp_in) {=
+        position, wp = wp_in.value
+
+        assert isinstance(wp, Material), f"Expected a Material at {position}, got {type(wp)}"
+        self._wp_by_pos[position] = wp
+        self.logger.debug(f"WP {wp} announced at {position}")
+    =}
+
+    // @label handle_cmd
+    reaction (cmd) -> movement_delay, mc.cmd{=
+        cmd = cmd.value
+        cmd_type = cmd.cmd_type
+
+        assert self._current_cmd is None, f"PA is busy with {self._current_cmd}, cannot accept {cmd}"
+        self._current_cmd = cmd
+
+        self.logger.debug(f"Received cmd {cmd}")
+
+        if cmd_type == PACmdType.MOVE_TO_POS:
+            travel_time = np.abs(self._axis_pos - self.get_pos_offset(cmd.position)) / self.speed
+            self.logger.info(f"Moving to {cmd.position}, travel time {travel_time} s")
+            movement_delay.schedule(round(SECS(travel_time)), cmd)
+
+        elif cmd_type == PACmdType.PICKUP_FROM_POS:
+            assert self._wp is None, f"PA is already holding WP {self._wp}"
+            self._wp = self._wp_by_pos.pop(cmd.position, None)
+            assert self._wp is not None, f"No WP announced at {cmd.position} to pick up"
+            self.logger.info(f"Picking up WP {self._wp} at {cmd.position}: extending MC")
+            mc.cmd.set(MonostableCylinderCmd.EXTEND)
+
+        elif cmd_type == PACmdType.PUTDOWN_TO_POS:
+            assert self._wp is not None, "PA is not holding any WP to put down"
+            self.logger.info(f"Putting down WP {self._wp} at {cmd.position}: extending MC")
+            mc.cmd.set(MonostableCylinderCmd.EXTEND)
+
+        else:
+            raise Exception(f"Received unknown PA command type: {cmd_type}")
+    =}
+
+    // @label complete_movement
+    reaction (movement_delay) -> position{=
+        cmd = movement_delay.value
+
+        self._axis_pos = self.get_pos_offset(cmd.position)
+        self._current_cmd = None
+        self.logger.debug(f"Reached {cmd.position} at axis offset {self._axis_pos} m")
+        position.set(cmd.position)
+    =}
+
+    // @label handle_mc_state_change
+    reaction (mc.s) -> mc.cmd, wp_out, wp_picked, wp_released{=
+        mc_state = mc.s.value
+        cmd = self._current_cmd
+
+        # The MC reports its initial state at startup, and keeps reporting the
+        # intermediate EXTENDING/RETRACTING states; only the two settled states
+        # matter, and only while a transfer is in progress.
+        if cmd is None:
+            return 0
+
+        if mc_state == MonostableCylinderState.EXTENDED:
+            # Gripper is down on the belt.
+            if cmd.cmd_type == PACmdType.PUTDOWN_TO_POS:
+                self.logger.debug(f"Releasing WP {self._wp} at {cmd.position}")
+                wp_out.set((cmd.position, self._wp))
+            mc.cmd.set(MonostableCylinderCmd.RETRACT)
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # Gripper is back up, the transfer is complete.
+            if cmd.cmd_type == PACmdType.PICKUP_FROM_POS:
+                wp_picked.set(self._wp)
+            else:
+                wp_released.set(self._wp)
+                self._wp = None
+
+            self._current_cmd = None
+            self.logger.info(f"Completed cmd {cmd}")
+    =}
+}

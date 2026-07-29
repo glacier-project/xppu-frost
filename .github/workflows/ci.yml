@@ -16,7 +16,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.13'
+        python-version: '3.12'
 
     - name: Cache pre-commit
       uses: actions/cache@v4
@@ -44,7 +44,7 @@ jobs:
     - name: Setup Python environment
       uses: ./.github/actions/setup-python
       with:
-        python-version: '3.13'
+        python-version: '3.12'
         requirements-file: requirements.txt
 
     - name: Run tests

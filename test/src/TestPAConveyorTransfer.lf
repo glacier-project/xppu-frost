@@ -1,0 +1,126 @@
+target Python{
+    fast: true,
+    timeout: 10 s,
+    single-threaded: false,
+}
+
+import PAConveyor from "../../src/conveyor/PAConveyor.lf";
+
+preamble{=
+import uuid
+from material import SteelMaterial
+
+logger = logging.getLogger("test_paconveyor_transfer")
+logger.setLevel(logging.DEBUG)
+
+CONVEYOR_REF_X = 0.255 # m
+CONVEYOR_REF_Y = 0.45  # m
+CONVEYOR_WIDTH = 0.055 # m
+
+# Where the WP must end up once the arm has set it down at POS3: the centre of
+# the POS3 area, which starts 0.26 m along the belt and is 0.055 m wide.
+POS3_CENTROID_X = CONVEYOR_REF_X + 0.26 + 0.055/2
+POS3_CENTROID_Y = CONVEYOR_REF_Y + CONVEYOR_WIDTH/2
+PLACEMENT_TOLERANCE = 1e-6 # m
+
+PYGAME_MANAGER = None
+=}
+
+/**
+ * Exercises the Pick Alpha arm on the belt: a WP travels to POS1, is lifted off
+ * there, is carried to POS3 while the belt stands still, is set back down, and
+ * then runs on to the end of the conveyor under its own command.
+ *
+ * Kept separate from TestPAConveyor, which drives four queued WPs through the
+ * MC guard and would make the transfer timing hard to pin down.
+ */
+main reactor TestPAConveyorTransfer {
+    state wp = {= SteelMaterial(id=str(uuid.uuid4())) =}
+    state picked_wp
+    state released_wp
+    state placed_at
+    state detected_at_ps_end
+    state exited_wp
+
+    logical action set_cmd
+
+    // Keep in sync with CONVEYOR_REF_X / CONVEYOR_REF_Y / CONVEYOR_WIDTH above,
+    // which the placement assertions are derived from.
+    c = new PAConveyor(name="pac",
+        ref_x=0.255, # m
+        ref_y=0.45, # m
+        c_angle=0, # radians
+        length=0.60, # m
+        width=0.055, # m
+        speed=0.185 # m/s
+    )
+
+    reaction (startup) -> c.wp_in_start, c.cmd {=
+        c.wp_in_start.set(self.wp)
+        c.cmd.set(ConveyorCmd(self.wp, PACCmdType.PICK_FROM_POS1))
+        logger.info(f"Added WP {self.wp} with command PICK_FROM_POS1")
+    =}
+
+    // Commands are re-issued through an action so that reacting to the
+    // conveyor's outputs does not close a causality loop back onto its input.
+    reaction (set_cmd) -> c.cmd {=
+        c.cmd.set(set_cmd.value)
+        logger.info(f"Issued command {set_cmd.value.cmd_type}")
+    =}
+
+    reaction (c.pa_wp_picked) -> set_cmd {=
+        self.picked_wp = c.pa_wp_picked.value
+        assert self.picked_wp == self.wp, f"Picked {self.picked_wp}, expected {self.wp}"
+        assert self.exited_wp is None, "WP left the conveyor before it was picked up"
+
+        logger.info(f"WP {self.picked_wp} picked from POS1, sending it to POS3")
+        set_cmd.schedule(0, ConveyorCmd(self.wp, PACCmdType.PUTDOWN_TO_POS3))
+    =}
+
+    reaction (c.pa_wp_released) -> set_cmd {=
+        self.released_wp = c.pa_wp_released.value
+        assert self.released_wp == self.wp, f"Released {self.released_wp}, expected {self.wp}"
+        assert self.picked_wp is not None, "WP was released without ever being picked up"
+
+        centroid = self.released_wp.shape.centroid_pos
+        self.placed_at = (centroid.x, centroid.y)
+        logger.info(f"WP {self.released_wp} released at {self.placed_at}")
+
+        set_cmd.schedule(0, ConveyorCmd(self.wp, PACCmdType.T_TO_PS_END))
+    =}
+
+    reaction (c.ps_end_wp_detected) -> set_cmd {=
+        self.detected_at_ps_end = c.ps_end_wp_detected.value
+        assert self.detected_at_ps_end == self.wp, \
+            f"ps-end reported {self.detected_at_ps_end}, expected {self.wp}"
+        assert self.exited_wp is None, "WP left the conveyor before reaching ps-end"
+
+        # T_TO_PS_END is complete, so the belt has no active command left and the
+        # WP is parked on the sensor until it is told to move on.
+        logger.info(f"WP {self.detected_at_ps_end} reached ps-end, sending it to the end")
+        set_cmd.schedule(0, ConveyorCmd(self.wp, PACCmdType.T_TO_END))
+    =}
+
+    reaction (c.wp_out_end) {=
+        self.exited_wp = c.wp_out_end.value
+        assert self.released_wp is not None, "WP reached the end before the transfer completed"
+        assert self.detected_at_ps_end is not None, "WP passed ps-end without it reporting"
+        logger.info(f"WP {self.exited_wp} left the conveyor at the end")
+    =}
+
+    reaction (shutdown) {=
+        assert self.picked_wp is not None, "PA never picked the WP up from POS1"
+        assert self.released_wp is not None, "PA never put the WP down at POS3"
+        assert self.detected_at_ps_end is not None, "T_TO_PS_END never completed at ps-end"
+        assert self.exited_wp == self.wp, f"Expected {self.wp} to leave the conveyor, got {self.exited_wp}"
+
+        # The arm carries the WP forward by 0.2325 m, which the belt alone could
+        # never do while it is held: getting this right means the WP really was
+        # detached from the belt and re-attached at the far position.
+        x, y = self.placed_at
+        assert abs(x - POS3_CENTROID_X) <= PLACEMENT_TOLERANCE, \
+            f"WP put down at x={x}, expected {POS3_CENTROID_X}"
+        assert abs(y - POS3_CENTROID_Y) <= PLACEMENT_TOLERANCE, \
+            f"WP put down at y={y}, expected {POS3_CENTROID_Y}"
+    =}
+}

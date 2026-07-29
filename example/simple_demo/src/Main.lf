@@ -6,9 +6,8 @@ target Python{
 }
 
 import XPPU from "../../../src/XPPU.lf"
-import FrostBus from "../../../frost/src/lib/FrostBus.lf"
+import FrostLink from "../../../frost/src/lib/FrostLink.lf"
 import FrostReactor from "../../../frost/src/lib/FrostReactor.lf"
-import FrostMachine from "../../../frost/src/lib/FrostMachine.lf"
 
 preamble{=
 import uuid
@@ -52,6 +51,10 @@ stack_buffer = [
     PlasticMaterial(id=str(uuid.uuid4())),
     SteelMaterial(id=str(uuid.uuid4()))
 ]
+
+# The conveyor reactors render themselves through this manager when it is set;
+# None disables rendering (same convention as the test suite).
+PYGAME_MANAGER = None
 =}
 
 reactor KafkaProducer extends FrostReactor {
@@ -108,9 +111,10 @@ reactor KafkaProducer extends FrostReactor {
     =}
 
     state kafka_topic = "xppu_data"
+    logical action wait_conn
 
     // @label setup_kafka_producer
-    reaction (startup) {=
+    reaction (startup) -> wait_conn {=
         # Use port 9093 for host connections, 9092 for container-to-container
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9093")
 
@@ -133,10 +137,18 @@ reactor KafkaProducer extends FrostReactor {
             self.loop
         ).result()  # Wait for the producer to start
         self.logger.info("KafkaProducer reactor initialized")
+
+        wait_conn.schedule(0)
     =}
 
     // @label subscribe_to_xppu_vars
-    reaction(connected_to_bus) -> channel_out {=
+    # FrostReactor exposes the link connection as the `connected` state rather
+    # than an event, so poll it until the link registration completes.
+    reaction(wait_conn) -> wait_conn, channel_out {=
+        if not self.connected:
+            wait_conn.schedule(MSEC(100))
+            return 0
+
         msgs = [
             self.message_builder.build_subscribe_variable_message(
                 target="xppu",
@@ -189,7 +201,7 @@ reactor KafkaProducer extends FrostReactor {
     =}
 }
 
-reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) extends FrostMachine{
+reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) extends FrostReactor{
     input is_stack_empty
     input stack_wp_at_pickup
 
@@ -202,14 +214,17 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
     logical action task_completed
     logical action start_tasks
     logical action update_schedule
+    logical action wait_conn
 
-    reaction(startup) {=
+    reaction(startup) -> wait_conn {=
         self.scheduling_instance = load_instance_from_json(self.scheduling_instance)
         self._executor = DynamicExecutor(DummySolver(instance=self.scheduling_instance))
 
         with open(self.recipe_template, "r") as f:
             self.recipe_template = Job.model_validate_json(f.read())
         self.logger.info(f"Loaded recipe template job: {self.recipe_template}")
+
+        wait_conn.schedule(0)
     =}
 
     method create_method_request(t, method_path, args, kwargs){=
@@ -226,9 +241,15 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
         self._set_channel_out_port(msg, channel_out)
     =}
 
-    // @label connected_to_bus
-    reaction(connected_to_bus) -> update_schedule, channel_out{=
-        self.logger.info("Connected to bus. Starting scheduling...")
+    // @label wait_for_link_connection
+    # FrostReactor exposes the link connection as the `connected` state rather
+    # than an event, so poll it until the link registration completes.
+    reaction(wait_conn) -> wait_conn, update_schedule, channel_out{=
+        if not self.connected:
+            wait_conn.schedule(MSEC(100))
+            return 0
+
+        self.logger.info("Connected to link. Starting scheduling...")
         update_schedule.schedule(0)
 
         self.send_stack_wp_request(channel_out)
@@ -275,8 +296,10 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 
         # Add here the request of the new workpiece if needed
 
-        for task, machine in start_tasks.value:
-            machine = machine.name
+        # next_ready_tasks() yields (ScheduledTask, machine id); the Machine
+        # object itself hangs off the scheduled task.
+        for task, machine_id in start_tasks.value:
+            machine = task.machine.name
             task_name = task.task.name
             self.logger.info(f"Starting task {task_name} on machine {machine}")
             task.start_time = self._get_current_logical_time_sec()
@@ -309,7 +332,7 @@ reactor XPPUScheduler(_scheduling_instance="undefined", _scheduling_interval=1) 
 }
 main reactor {
     xppu = new XPPU(name="xppu", stack_buffer={= deepcopy(stack_buffer)=})
-    bus = new FrostBus(name="frost_bus", width=3)
+    bus = new FrostLink(name="frost_link", width=3)
     xppu_scheduler = new XPPUScheduler(name="xppu_scheduler", update_interval=100 ms)
     kafka_producer = new KafkaProducer(name="kafka_producer")
 

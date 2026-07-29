@@ -1,0 +1,98 @@
+target Python{
+    files: [
+        "../python-lib/conveyor.py",
+        "../python-lib/rfc.py",
+        "../python-lib/f_compare.py",
+        "../python-lib/shape.py",
+        "../python-lib/material.py",
+        "../python-lib/monostable_cylinder.py",
+        "../python-lib/guard.py",
+    ]
+}
+
+import MonostableCylinder from "../common/MonostableCylinder.lf"
+import Conveyor from "Conveyor.lf"
+
+preamble{=
+from frost import *
+import numpy as np
+from f_compare import cos, sin
+from shape import ConveyorBeltShape, Point, ComponentShape
+from material import Material
+from position_sensor import PositionSensor
+from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
+from guard import Guard
+from conveyor import ConveyorCmd
+from rfc import RFCCmdType
+=}
+
+reactor RFConveyor extends Conveyor{
+    preamble{=
+        PS_WIDTH = 0.016
+        PS_LENGTH = 0.055
+        PSS_OFFSET = 0.055
+        PSE_OFFSET = 0.355
+        MC_GUARD_OFFSET = 0.375 # lock
+        MC_GUARD_WIDTH = 0.016
+        MC_GUARD_LENGTH = 0.055
+    =}
+
+    state _guard_switch_delay = 360 # ms
+    state _position_sensor_start = {=PositionSensor(name="ps-start", working_area=self._conveyor_shape.get_sensor_shape(self.PSS_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+    state _position_sensor_end = {=PositionSensor(name="ps-end", working_area=self._conveyor_shape.get_sensor_shape(self.PSE_OFFSET, self.PS_WIDTH, self.PS_LENGTH))=}
+
+    state _mc_guard_area = {= self._conveyor_shape.get_sensor_shape(self.MC_GUARD_OFFSET, self.MC_GUARD_WIDTH, self.MC_GUARD_LENGTH) =}
+    state _mc_guard = {= Guard(name="mc-guard", guard_area=self._mc_guard_area, active=True) =}
+
+    logical action extend_mc
+    output mc_guard_state
+
+    mc_guard = new MonostableCylinder(
+        name={=self.name + ".mc_guard"=},
+        retraction_speed=223.684, # m/s t= 0.38ms
+        extension_speed=472.222, # m/s t= 0.18ms
+        extension_length=0.085, # m
+        is_retracted=False
+    )
+    mc_guard.s -> mc_guard_state
+
+    reaction (startup) {=
+        # Add PS triggers
+        self.register_position_sensor_trigger(
+            sensor=self._position_sensor_end,
+            triggering_cmd=RFCCmdType.T_TO_LSC,
+            target_action="disable_mc_guard",
+            delay=0
+        )
+        self.add_guard(self._mc_guard)
+    =}
+
+    // @label handle_ps_actions
+    reaction (trigger_ps_action) -> mc_guard.cmd{=
+        action, wp = trigger_ps_action.value
+
+        if action == "disable_mc_guard":
+            self.logger.debug("Disabling MC Guard")
+            mc_guard.cmd.set(MonostableCylinderCmd.RETRACT)
+    =}
+
+    reaction (extend_mc) -> mc_guard.cmd{=
+        self.logger.debug("Enabling MC Guard")
+        mc_guard.cmd.set(MonostableCylinderCmd.EXTEND)
+    =}
+
+    // @label handle_mc_guard_state_update
+    reaction (mc_guard.s) -> mc_guard.cmd, extend_mc{=
+
+        mc_state=mc_guard.s.value
+        if mc_state == MonostableCylinderState.EXTENDING:
+            # Activate guard stopping WPs
+            self._mc_guard.activate()
+
+        if mc_state == MonostableCylinderState.RETRACTED:
+            # Deactivate guard allowing WPs to pass
+            self._mc_guard.deactivate()
+            # Extend the MC after some delay
+            extend_mc.schedule(MSEC(self._guard_switch_delay))
+    =}
+}
