@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use xPPU-Frost, please cite it as below."
+type: software
+title: "xPPU-Frost: A Testbed for Evaluating Deterministic Industrial Automation Strategies"
+authors:
+  - family-names: "Santacà"
+    given-names: "Samuele"
+  - family-names: "Gaiardelli"
+    given-names: "Sebastiano"
+  - family-names: "Fummi"
+    given-names: "Franco"
+repository-code: "https://github.com/glacier-project/xppu-frost"
+license: BSD-2-Clause
+preferred-citation:
+  type: conference-paper
+  title: "xPPU-Frost: A Testbed for Evaluating Deterministic Industrial Automation Strategies"
+  authors:
+    - family-names: "Santacà"
+      given-names: "Samuele"
+    - family-names: "Gaiardelli"
+      given-names: "Sebastiano"
+    - family-names: "Fummi"
+      given-names: "Franco"
+  collection-title: "2026 IEEE 24rd International Conference on Industrial Informatics (INDIN)"
+  conference:
+    name: "IEEE International Conference on Industrial Informatics"
+    acronym: "INDIN"
+    date-start: 2026-07-26
+    date-end: 2026-07-29
+  year: 2026
+  publisher:
+    name: "IEEE"
