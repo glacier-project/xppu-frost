@@ -271,8 +271,7 @@ reactor Conveyor(
             wp_out = wp_out_start
             wp_angle = (self._conveyor_shape.angle + np.pi) % (2 * np.pi)
 
-        wps = iter(self._wps)
-
+        wps = list(self._wps)
         for i, wp in enumerate(wps):
 
             # Update WP position
@@ -289,10 +288,10 @@ reactor Conveyor(
                 self.logger.debug(f"New center at {end_position}")
 
             # Check for collision with other WPs
-            if i > 0 and wp != self._wps[i-1] and shape.intersects(self._wps[i-1].shape):
-                shape.collision(self._wps[i-1].shape, wp_angle)
+            if i > 0 and wp != wps[i-1] and shape.intersects(wps[i-1].shape):
+                shape.collision(wps[i-1].shape, wp_angle)
                 end_position = wp.shape.centroid_pos
-                self.logger.debug(f"Detected collision of WP {wp} with wp {self._wps[i-1]}, new center at {end_position}")
+                self.logger.debug(f"Detected collision of WP {wp} with wp {wps[i-1]}, new center at {end_position}")
 
             if i == 0 and not self._conveyor_shape.intersects(shape):
                 # remove WP

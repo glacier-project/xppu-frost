@@ -14,6 +14,11 @@ class AreaCondition(str, Enum):
     # (held by the arm) and needs a free slot to be put down into.
     AREA_CLEAR = "AREA_CLEAR"
 
+    # The commanded WP has been inside the area and has now left it. Used to act
+    # on a WP having physically cleared something, which a fixed delay cannot
+    # express once the belt may stop part-way through.
+    WP_PASSED = "WP_PASSED"
+
 class AreaTrigger:
     """Fires when a workpiece's relation to a fixed area of the conveyor
     satisfies a condition while a specific command is active.
@@ -31,13 +36,22 @@ class AreaTrigger:
         self.condition = condition
         self.delay = delay
         self._fired = set()
+        self._entered = set()
 
     def _holds(self, wp: Material, wps: list) -> bool:
         if self.condition == AreaCondition.WP_INSIDE:
             return wp in wps and self.area.contains(wp.shape)
 
-        assert self.condition == AreaCondition.AREA_CLEAR, f"Unknown area condition {self.condition}"
-        return not any(self.area.intersects(other.shape) for other in wps)
+        if self.condition == AreaCondition.AREA_CLEAR:
+            return not any(self.area.intersects(other.shape) for other in wps)
+
+        assert self.condition == AreaCondition.WP_PASSED, f"Unknown area condition {self.condition}"
+        if self.area.intersects(wp.shape):
+            self._entered.add(wp.id)
+            return False
+        # Only counts as passed if the WP was seen inside the area first, so a
+        # WP that has not reached it yet does not look like one that is through.
+        return wp.id in self._entered
 
     def is_triggered(self, wp: Material, wps: list) -> bool:
         """Evaluates the condition for `wp` against the workpieces `wps`

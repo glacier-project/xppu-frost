@@ -1,0 +1,16 @@
+time_precision: MSECS
+logging_level: DEBUG
+reactors:
+  pac:
+    logging_level: DEBUG
+    parameters:
+      _speed: 0.185 # m/s
+      _is_on: false
+    reactors:
+      pa:
+        logging_level: INFO
+        reactors:
+          mc:
+            logging_level: WARNING
+      mc_guard:
+        logging_level: WARNING

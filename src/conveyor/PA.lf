@@ -30,7 +30,6 @@ from monostable_cylinder import MonostableCylinderCmd, MonostableCylinderState
  */
 reactor PA(
     speed=0.2,      # m/s
-    length=0.46,    # m
     pos1=0.0175,    # m
     pos2=0.0625,    # m
     pos3=0.2225,    # m

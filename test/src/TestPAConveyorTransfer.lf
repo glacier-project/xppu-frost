@@ -39,6 +39,7 @@ main reactor TestPAConveyorTransfer {
     state picked_wp
     state released_wp
     state placed_at
+    state detected_at_ps_end
     state exited_wp
 
     logical action set_cmd
@@ -85,18 +86,32 @@ main reactor TestPAConveyorTransfer {
         self.placed_at = (centroid.x, centroid.y)
         logger.info(f"WP {self.released_wp} released at {self.placed_at}")
 
+        set_cmd.schedule(0, ConveyorCmd(self.wp, PACCmdType.T_TO_PS_END))
+    =}
+
+    reaction (c.ps_end_wp_detected) -> set_cmd {=
+        self.detected_at_ps_end = c.ps_end_wp_detected.value
+        assert self.detected_at_ps_end == self.wp, \
+            f"ps-end reported {self.detected_at_ps_end}, expected {self.wp}"
+        assert self.exited_wp is None, "WP left the conveyor before reaching ps-end"
+
+        # T_TO_PS_END is complete, so the belt has no active command left and the
+        # WP is parked on the sensor until it is told to move on.
+        logger.info(f"WP {self.detected_at_ps_end} reached ps-end, sending it to the end")
         set_cmd.schedule(0, ConveyorCmd(self.wp, PACCmdType.T_TO_END))
     =}
 
     reaction (c.wp_out_end) {=
         self.exited_wp = c.wp_out_end.value
         assert self.released_wp is not None, "WP reached the end before the transfer completed"
+        assert self.detected_at_ps_end is not None, "WP passed ps-end without it reporting"
         logger.info(f"WP {self.exited_wp} left the conveyor at the end")
     =}
 
     reaction (shutdown) {=
         assert self.picked_wp is not None, "PA never picked the WP up from POS1"
         assert self.released_wp is not None, "PA never put the WP down at POS3"
+        assert self.detected_at_ps_end is not None, "T_TO_PS_END never completed at ps-end"
         assert self.exited_wp == self.wp, f"Expected {self.wp} to leave the conveyor, got {self.exited_wp}"
 
         # The arm carries the WP forward by 0.2325 m, which the belt alone could
